@@ -77,3 +77,5 @@ The board's port (`/dev/cu.usbmodem...`) changes each time it is plugged in. Use
 ## Repository Notes
 
 The remote uses SSH (`git@github.com:dglcinc/Arduino.git`), not HTTPS. The default branch is `main`.
+
+The local clone lives at `~/OneDrive - DGLC/Claude/github/Arduino/`. There is also a stale copy at `~/OneDrive - DGLC/GitHub/Arduino/` — that one is not the active working directory and should not be used.
