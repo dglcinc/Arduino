@@ -1,0 +1,3 @@
+# WiFi credentials — copy arduino_secrets.h.example to each sketch folder
+# and fill in your credentials. Never commit the real secrets file.
+arduino_secrets.h

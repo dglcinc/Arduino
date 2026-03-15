@@ -29,7 +29,7 @@ Both boards have static IP addresses assigned via DHCP reservation on the router
 
 ## How It Works
 
-On each loop iteration the sketch reads A0, converts the ADC count to PSI using the sensor's voltage range, then listens for an incoming HTTP connection. When a request arrives it responds with a single line of pseudo-JSON:
+On each loop iteration the sketch checks WiFi connectivity (reconnecting automatically if the connection dropped), reads A0 at 14-bit resolution, converts the ADC count to PSI using the sensor's voltage range, then listens for an incoming HTTP connection. When a request arrives it responds with a single line of pseudo-JSON:
 
 ```
 {'psi' : 18.400000}
@@ -39,23 +39,25 @@ Note: single quotes are used, not double quotes — this is intentional. The piv
 
 The response is wrapped in minimal HTML boilerplate (the original template code), but pivac ignores everything except the `{'psi': ...}` line, which it extracts with a regex.
 
-## Key Differences Between the Two Sketches
+## Code Structure
 
-The sketches are nearly identical. The only meaningful differences are `sensorMaxPsi` (100 vs 200) and `sensorMaxV` (4.5V vs 5.0V), which reflect the two different sensor models. The Domestic sketch also has slightly more debug `Serial.println` calls.
+All shared logic lives in `ArduinoPSI_impl.h`, which is identical in both sketch folders. Each `.ino` file is a minimal stub that defines only the two sensor-specific constants (`SENSOR_MAX_PSI` and `SENSOR_MAX_V`) and then `#include`s the shared header.
+
+When making logic changes, edit `ArduinoPSI_impl.h` in one sketch folder and copy it to the other. The diff between the two `.ino` files should always be just those two constant values.
 
 ## Known Issues / Notes
 
-**WiFi credentials are hardcoded in the .ino files.** The sketches include a comment directing credentials to `arduino_secrets.h`, but the actual `ssid` and `pass` variables are set inline in the code, and `arduino_secrets.h` is blank. The credentials are therefore committed to the repo. This is a known issue — if credentials need to change, update them in the `.ino` file directly (and be mindful of git history).
+**WiFi credentials are in `arduino_secrets.h` (gitignored).** Each sketch folder contains an `arduino_secrets.h` that defines `SECRET_SSID` and `SECRET_PASS`. This file is listed in `.gitignore` and is not committed. If you clone the repo fresh, copy `arduino_secrets.h.example` from the repo root to each sketch folder and fill in your credentials. Note that credentials were previously committed inline in the `.ino` files — the git history retains that, but they are no longer committed going forward.
 
 **Response format is not strict JSON.** Single-quoted keys and floats with trailing zeros are valid Python literals but not valid JSON. Changing to strict JSON would require updating `ArduinoSensor.py` in the pivac repo at the same time.
 
-**`psiMax` resets on reboot only.** The sketch tracks the session maximum PSI and displays it on the LED matrix, but it's a runtime variable and is lost when the board resets.
+**`psiMax` resets on reboot only.** The sketch tracks the session maximum PSI and displays it on the LED matrix, but it is a runtime `float` variable and is lost when the board resets.
 
 **LED matrix display.** The matrix alternates every second between current PSI (e.g. ` 18`) and max PSI (e.g. `m42`).
 
 ## Deploying Changes
 
-Arduino sketches are deployed via the Arduino IDE (or Arduino CLI) — there is no OTA update mechanism. To update a board, connect via USB, open the sketch in the Arduino IDE, and upload. The board's IP and WiFi credentials must match the router and pivac config.
+Arduino sketches are deployed via the Arduino IDE (or Arduino CLI) — there is no OTA update mechanism. To update a board, connect via USB, open the sketch in the Arduino IDE, and upload. Before uploading, ensure `arduino_secrets.h` exists in the sketch folder with the correct credentials (it is gitignored, so a fresh clone will not have it — copy from `arduino_secrets.h.example`). The board's IP and WiFi credentials must match the router and pivac config.
 
 ## Repository Notes
 
