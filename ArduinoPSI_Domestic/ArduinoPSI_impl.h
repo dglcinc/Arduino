@@ -51,6 +51,11 @@ int   sensorValue = 0;
 float psi         = 0.0f;
 float psiMax      = 0.0f;
 
+// Display state — tracks which value is shown and when it last changed.
+// Using millis() keeps the display alternating without blocking loop().
+unsigned long lastDisplayChange = 0;
+int           displayMode       = 0;  // 0 = current PSI, 1 = max PSI
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -161,24 +166,26 @@ void loop() {
     client.stop();
   }
 
-  // Display current PSI for 1 s, then session-max PSI for 1 s.
-  sprintf(displayText, " %d", (int)psi);
-  matrix.beginDraw();
-  matrix.stroke(0xFFFFFFFF);
-  matrix.textFont(Font_4x6);
-  matrix.beginText(1, 2, 0xFFFFFF);
-  matrix.println(displayText);
-  matrix.endText();
-  matrix.endDraw();
-  delay(1000);
+  // Alternate display between current PSI and session-max PSI every second.
+  // millis()-based timing avoids blocking loop() so HTTP requests are served
+  // promptly regardless of where the display cycle is.
+  unsigned long now = millis();
+  if (now - lastDisplayChange >= 1000) {
+    displayMode = 1 - displayMode;
+    lastDisplayChange = now;
 
-  sprintf(displayText, "m%d", (int)psiMax);
-  matrix.beginDraw();
-  matrix.stroke(0xFFFFFFFF);
-  matrix.textFont(Font_4x6);
-  matrix.beginText(1, 2, 0xFFFFFF);
-  matrix.println(displayText);
-  matrix.endText();
-  matrix.endDraw();
-  delay(1000);
+    if (displayMode == 0) {
+      sprintf(displayText, " %d", (int)psi);
+    } else {
+      sprintf(displayText, "m%d", (int)psiMax);
+    }
+
+    matrix.beginDraw();
+    matrix.stroke(0xFFFFFFFF);
+    matrix.textFont(Font_4x6);
+    matrix.beginText(1, 2, 0xFFFFFF);
+    matrix.println(displayText);
+    matrix.endText();
+    matrix.endDraw();
+  }
 }
