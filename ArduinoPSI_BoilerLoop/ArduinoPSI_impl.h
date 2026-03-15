@@ -79,11 +79,6 @@ void printWifiStatus() {
   Serial.print("Signal strength (RSSI): ");
   Serial.print(rssi);
   Serial.println(" dBm");
-  byte mac[6];
-  WiFi.macAddress(mac);
-  sprintf(output, "MAC: %02X:%02X:%02X:%02X:%02X:%02X",
-          mac[5], mac[4], mac[3], mac[2], mac[1], mac[0]);
-  Serial.println(output);
 }
 
 // ---------------------------------------------------------------------------
