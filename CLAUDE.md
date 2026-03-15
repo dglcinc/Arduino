@@ -18,14 +18,15 @@ Two Arduino UNO R4 WiFi sketches that each run a minimal HTTP server serving the
 
 ## Hardware
 
-Both units are **Arduino UNO R4 WiFi** boards. The pressure sensor connects to analog pin A0. The board's built-in LED matrix displays the current and max PSI readings.
+All boards are **Arduino UNO R4 WiFi**. The pressure sensor connects to analog pin A0. The board's built-in LED matrix displays the current and max PSI readings.
 
-| Sketch              | Sensor        | IP          | Max PSI | Sensor voltage range |
-|---------------------|---------------|-------------|---------|----------------------|
-| ArduinoPSI_BoilerLoop | Fusch 100PSI  | 10.0.0.114  | 100     | 0.5–4.5V             |
-| ArduinoPSI_Domestic   | Fusch 200PSI  | 10.0.0.219  | 200     | 0.5–5.0V             |
+| Sketch              | Sensor        | IP          | MAC                | Max PSI | Sensor voltage range |
+|---------------------|---------------|-------------|--------------------|---------|----------------------|
+| ArduinoPSI_BoilerLoop | Fusch 100PSI  | 10.0.0.114  | c0:4e:30:11:6f:3c  | 100     | 0.5–4.5V             |
+| ArduinoPSI_Domestic   | Fusch 200PSI  | 10.0.0.219  | 34:b7:da:66:1e:50  | 200     | 0.5–5.0V             |
+| (experimental)        | —             | 10.0.0.188  | 34:b7:da:65:99:1c  | —       | —                    |
 
-Both boards have static IP addresses assigned via DHCP reservation on the router.
+All boards have static IP addresses assigned via DHCP reservation on the router.
 
 ## How It Works
 
@@ -58,6 +59,20 @@ When making logic changes, edit `ArduinoPSI_BoilerLoop/ArduinoPSI_impl.h` direct
 ## Deploying Changes
 
 Arduino sketches are deployed via the Arduino IDE (or Arduino CLI) — there is no OTA update mechanism. To update a board, connect via USB, open the sketch in the Arduino IDE, and upload. Before uploading, ensure `arduino_secrets.h` exists in the sketch folder with the correct credentials (it is gitignored, so a fresh clone will not have it — copy from `arduino_secrets.h.example`). The board's IP and WiFi credentials must match the router and pivac config.
+
+To compile and upload via arduino-cli (the local `libraries/` folder must be passed explicitly since ArduinoGraphics is not in the global library path):
+
+```bash
+arduino-cli compile --fqbn arduino:renesas_uno:unor4wifi \
+  --libraries ArduinoPSI_BoilerLoop/libraries \
+  ArduinoPSI_BoilerLoop
+
+arduino-cli upload --fqbn arduino:renesas_uno:unor4wifi \
+  --port /dev/cu.usbmodem<id> \
+  ArduinoPSI_BoilerLoop
+```
+
+The board's port (`/dev/cu.usbmodem...`) changes each time it is plugged in. Use `arduino-cli board list` to find the current port.
 
 ## Repository Notes
 
