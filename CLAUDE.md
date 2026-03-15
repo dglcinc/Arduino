@@ -41,9 +41,9 @@ The response is wrapped in minimal HTML boilerplate (the original template code)
 
 ## Code Structure
 
-All shared logic lives in `ArduinoPSI_impl.h`, which is identical in both sketch folders. Each `.ino` file is a minimal stub that defines only the two sensor-specific constants (`SENSOR_MAX_PSI` and `SENSOR_MAX_V`) and then `#include`s the shared header.
+All shared logic lives in `ArduinoPSI_BoilerLoop/ArduinoPSI_impl.h`. The copy in `ArduinoPSI_Domestic/` is a symlink pointing to it — there is only one file on disk. Each `.ino` file is a minimal stub that defines only the two sensor-specific constants (`SENSOR_MAX_PSI` and `SENSOR_MAX_V`) and then `#include`s the shared header.
 
-When making logic changes, edit `ArduinoPSI_impl.h` in one sketch folder and copy it to the other. The diff between the two `.ino` files should always be just those two constant values.
+When making logic changes, edit `ArduinoPSI_BoilerLoop/ArduinoPSI_impl.h` directly. The symlink means the Domestic sketch always picks up the same file automatically. The diff between the two `.ino` files should always be just those two constant values.
 
 ## Known Issues / Notes
 
