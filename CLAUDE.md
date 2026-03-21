@@ -1,16 +1,10 @@
-# CLAUDE.md
+# CLAUDE.md — Arduino (project-specific)
 
-This file provides guidance to Claude when working with code in this repository.
-
-## Working Style
-
-- **Execute without repeated check-ins.** Before a multi-step task, state the plan briefly and confirm once. Then carry out all steps without asking permission at each one.
-- **Targeted edits, not rewrites.** When modifying an existing file, make surgical changes to the relevant lines. Do not rewrite or reorder content that isn't changing — it creates noise in diffs and risks dropping things accidentally.
-- **PR workflow for code.** Always create a feature branch and open a pull request for code changes. Only push directly to `main` for meta/context files (CLAUDE.md).
-- **Keep CLAUDE.md current.** After significant changes — new hardware, sensor changes, bug fixes — update this file and include it in the commit.
-- **No unnecessary confirmation loops.** Don't ask "should I proceed?" or "does this look right?" mid-task. Finish the work, then summarize what was done.
-- **Commit message quality.** Write commit messages that explain why, not just what. Reference the problem being solved, not just the files changed.
-- **Prose over bullets in explanations.** When explaining an approach or decision, write in sentences rather than fragmenting everything into bullet lists.
+> Working style, machine detection, and GitHub conventions are in the global context:
+> `<github-dir>/claude-contexts/CLAUDE.md`
+>
+> Note: This repo is Mac-only. Arduino deployment requires the Arduino IDE or arduino-cli
+> and a USB connection; there is no remote deployment path from the Pi.
 
 ## What This Project Does
 
