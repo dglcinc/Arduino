@@ -1,9 +1,12 @@
 // ArduinoPSI_impl.h — shared implementation for all ArduinoPSI sketches.
 //
-// This file is IDENTICAL in ArduinoPSI_BoilerLoop and ArduinoPSI_Domestic.
-// Edit in one place and copy to the other. The only per-sketch differences
-// are SENSOR_MAX_PSI and SENSOR_MAX_V, which the parent .ino defines before
-// including this file.
+// ArduinoPSI_Domestic/ArduinoPSI_impl.h is a SYMLINK to this file, so both
+// boards compile from this single source — edit here and both pick it up.
+// Per-sketch differences are set by the parent .ino before the include:
+//   - SENSOR_MAX_PSI / SENSOR_MAX_V (both boards)
+//   - ONE_WIRE_BUS (Domestic only) compile-enables the DS18B20 recirc-loop
+//     temperature; the BoilerLoop board leaves it undefined, so its
+//     {'psi' : ...} response and code are completely unchanged.
 //
 // Hardware: Arduino UNO R4 WiFi + ratiometric analog pressure sensor on A0.
 // See CLAUDE.md for full wiring and sensor details.
@@ -15,6 +18,18 @@
 #include "Arduino_LED_Matrix.h"
 #include "WiFiS3.h"
 #include "arduino_secrets.h"  // defines SECRET_SSID and SECRET_PASS
+
+// DS18B20 recirc-loop temperature — compiled in only when the parent sketch
+// defines ONE_WIRE_BUS (the Domestic/DHW board). Requires the OneWire and
+// DallasTemperature libraries: arduino-cli lib install "OneWire" "DallasTemperature".
+#ifdef ONE_WIRE_BUS
+#include <OneWire.h>
+#include <DallasTemperature.h>
+OneWire           oneWire(ONE_WIRE_BUS);
+DallasTemperature ds18b20(&oneWire);
+float         tempF        = DEVICE_DISCONNECTED_F;  // last good reading, Fahrenheit
+unsigned long lastTempRead = 0;
+#endif
 
 // WiFi credentials — defined via arduino_secrets.h (not committed to git).
 // See CLAUDE.md and arduino_secrets.h.example for the required format.
@@ -104,6 +119,15 @@ void setup() {
   // pinDigResolution above (16384) must match this setting.
   analogReadResolution(14);
 
+#ifdef ONE_WIRE_BUS
+  // Non-blocking DS18B20: setWaitForConversion(false) makes requestTemperatures()
+  // and the later getTemp call return immediately, so they never stall loop()/HTTP.
+  ds18b20.begin();
+  ds18b20.setResolution(12);            // 0.0625 C
+  ds18b20.setWaitForConversion(false);
+  ds18b20.requestTemperatures();        // kick off the first conversion
+#endif
+
   connectWiFi();
   server.begin();
   printWifiStatus();
@@ -132,6 +156,17 @@ void loop() {
   sprintf(output, "Sensor: %d  PSI: %f  TotalTicks: %f", sensorValue, psi, sensorTotalTicks);
   Serial.println(output);
 
+#ifdef ONE_WIRE_BUS
+  // Refresh the DS18B20 every ~3s without blocking: read the result of the
+  // previous conversion, then immediately start the next one. Both calls return
+  // immediately (setWaitForConversion(false)), so HTTP latency is unaffected.
+  if (millis() - lastTempRead >= 3000) {
+    tempF = ds18b20.getTempFByIndex(0);
+    ds18b20.requestTemperatures();
+    lastTempRead = millis();
+  }
+#endif
+
   // Serve a pending HTTP request if one is waiting.
   WiFiClient client = server.available();
   if (client) {
@@ -150,7 +185,11 @@ void loop() {
           client.println();
           client.println("<!DOCTYPE HTML>");
           client.println("<html>");
+#ifdef ONE_WIRE_BUS
+          sprintf(jsonResponse, "{'psi' : %f, 'temp' : %f}", psi, tempF);
+#else
           sprintf(jsonResponse, "{'psi' : %f}", psi);
+#endif
           client.println(jsonResponse);
           client.println("</html>");
           break;
