@@ -17,6 +17,7 @@
 #include "ArduinoGraphics.h"
 #include "Arduino_LED_Matrix.h"
 #include "WiFiS3.h"
+#include "WDT.h"               // RA4M1 hardware watchdog
 #include "arduino_secrets.h"  // defines SECRET_SSID and SECRET_PASS
 
 // DS18B20 recirc-loop temperature — compiled in only when the parent sketch
@@ -71,17 +72,40 @@ float psiMax      = 0.0f;
 unsigned long lastDisplayChange = 0;
 int           displayMode       = 0;  // 0 = current PSI, 1 = max PSI
 
+// Reliability tuning -------------------------------------------------------
+// RA4M1 hardware watchdog timeout (max ~5.6 s). loop() refreshes it every
+// iteration, so the board self-resets only if a whole iteration wedges
+// (e.g. a stuck HTTP client) for longer than this.
+const uint32_t      WDT_TIMEOUT_MS           = 5000;
+// How long to keep trying to (re)associate before giving up. On expiry the
+// caller forces a full board reset rather than hammering a wedged module.
+const unsigned long WIFI_CONNECT_BUDGET_MS   = 20000;
+// Max time to service one HTTP client before dropping it. Bounds the
+// previously-unbounded request loop so a stalled poller cannot hang the
+// board. pivac polls complete in well under a second.
+const unsigned long HTTP_CLIENT_TIMEOUT_MS   = 2000;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-void connectWiFi() {
+// (Re)connect to WiFi, bounded by budgetMs. Refreshes the watchdog while it
+// waits so a slow-but-progressing association does not trip it. Returns true
+// on success, false if the budget elapsed without connecting. A caller that
+// gets false should force a full reset: a clean reboot clears a wedged WiFi
+// module far more reliably than repeated WiFi.begin() calls.
+bool connectWiFi(unsigned long budgetMs) {
+  unsigned long start = millis();
+  Serial.print("Connecting to SSID: ");
+  Serial.println(ssid);
+  WiFi.disconnect();             // clear any half-open / wedged association
+  WiFi.begin(ssid, pass);
   while (WiFi.status() != WL_CONNECTED) {
-    Serial.print("Connecting to SSID: ");
-    Serial.println(ssid);
-    WiFi.begin(ssid, pass);
-    delay(10000);
+    if (millis() - start > budgetMs) return false;
+    WDT.refresh();
+    delay(250);
   }
+  return true;
 }
 
 void printWifiStatus() {
@@ -102,6 +126,15 @@ void printWifiStatus() {
 
 void setup() {
   Serial.begin(115200);
+
+  // Arm the hardware watchdog FIRST so even a wedge in early init (missing
+  // WiFi module, etc.) self-resets and retries instead of hanging forever.
+  // loop() and connectWiFi() both refresh it well inside the timeout.
+  if (!WDT.begin(WDT_TIMEOUT_MS)) {
+    Serial.println("WDT.begin failed (timeout out of range?)");
+  } else {
+    Serial.println("Watchdog armed.");
+  }
 
   if (WiFi.status() == WL_NO_MODULE) {
     Serial.println("Communication with WiFi module failed!");
@@ -128,17 +161,27 @@ void setup() {
   ds18b20.requestTemperatures();        // kick off the first conversion
 #endif
 
-  connectWiFi();
+  // Block until the first association. connectWiFi() refreshes the watchdog
+  // while it waits; if a budget elapses we just retry (e.g. AP still booting).
+  while (!connectWiFi(WIFI_CONNECT_BUDGET_MS)) {
+    Serial.println("Initial WiFi connect timed out; retrying...");
+  }
   server.begin();
   printWifiStatus();
   matrix.begin();
 }
 
 void loop() {
-  // Reconnect silently if WiFi dropped since last iteration.
+  WDT.refresh();   // pet the watchdog once per iteration
+
+  // Reconnect if WiFi dropped since last iteration.
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi lost — reconnecting...");
-    connectWiFi();
+    if (!connectWiFi(WIFI_CONNECT_BUDGET_MS)) {
+      Serial.println("Reconnect failed; resetting board.");
+      delay(50);             // let serial flush before the reset
+      NVIC_SystemReset();    // full board reset - does not return
+    }
     printWifiStatus();
   }
 
@@ -170,8 +213,10 @@ void loop() {
   // Serve a pending HTTP request if one is waiting.
   WiFiClient client = server.available();
   if (client) {
+    unsigned long clientStart = millis();
     boolean currentLineIsBlank = true;
     while (client.connected()) {
+      if (millis() - clientStart > HTTP_CLIENT_TIMEOUT_MS) break;  // drop a stalled client
       if (client.available()) {
         char c = client.read();
         if (c == '\n' && currentLineIsBlank) {
@@ -185,10 +230,14 @@ void loop() {
           client.println();
           client.println("<!DOCTYPE HTML>");
           client.println("<html>");
+          // 'uptime_ms' (millis() since boot) lets the pivac side tell a
+          // self-reconnect (uptime keeps climbing) from a reboot/brownout
+          // (uptime resets to ~0). Extra keys are harmless: pivac parses the
+          // line with ast.literal_eval and ignores keys it doesn't use.
 #ifdef ONE_WIRE_BUS
-          sprintf(jsonResponse, "{'psi' : %f, 'temp' : %f}", psi, tempF);
+          sprintf(jsonResponse, "{'psi' : %f, 'temp' : %f, 'uptime_ms' : %lu}", psi, tempF, millis());
 #else
-          sprintf(jsonResponse, "{'psi' : %f}", psi);
+          sprintf(jsonResponse, "{'psi' : %f, 'uptime_ms' : %lu}", psi, millis());
 #endif
           client.println(jsonResponse);
           client.println("</html>");
