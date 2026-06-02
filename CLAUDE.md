@@ -16,11 +16,20 @@ All boards are **Arduino UNO R4 WiFi**. The pressure sensor connects to analog p
 
 | Sketch              | Sensor        | IP          | MAC                | Max PSI | Sensor voltage range |
 |---------------------|---------------|-------------|--------------------|---------|----------------------|
-| ArduinoPSI_BoilerLoop | Fusch 100PSI  | 10.0.0.114  | c0:4e:30:11:6f:3c  | 100     | 0.5–4.5V             |
-| ArduinoPSI_Domestic   | Fusch 200PSI  | 10.0.0.219  | 34:b7:da:66:1e:50  | 200     | 0.5–5.0V             |
+| ArduinoPSI_BoilerLoop | Fusch 100PSI  | 10.0.0.219  | 34:b7:da:66:1e:50  | 100     | 0.5–4.5V             |
+| ArduinoPSI_Domestic   | Fusch 200PSI  | 10.0.0.114  | c0:4e:30:11:6f:3c  | 200     | 0.5–5.0V             |
 | (experimental)        | —             | 10.0.0.188  | 34:b7:da:65:99:1c  | —       | —                    |
 
 All boards have static IP addresses assigned via DHCP reservation on the router.
+
+> **IP/MAC mapping verified 2026-06-02** against the boards' USB serials and the
+> live readings (the `.219`/`34:b7:da:66:1e:50` board reports ~12 PSI — a hydronic
+> loop pressure — confirming the 100 PSI BoilerLoop firmware). An earlier version of
+> this table had the IP and MAC columns swapped between the two rows; do not re-invert.
+> The DS18B20 DHW-recirc sensor is on the **Domestic** board (`.114`) only. NB: the
+> pivac-side *module* names are inverted vs role (`pivac.ArduinoPSI` = DHW `.114`,
+> `pivac.ArduinoThermPSI` = boiler `.219`) — see pivac `CLAUDE.md`; the sketch names
+> here (Domestic = DHW, BoilerLoop = boiler) are correct.
 
 ## How It Works
 
