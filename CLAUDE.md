@@ -16,11 +16,20 @@ All boards are **Arduino UNO R4 WiFi**. The pressure sensor connects to analog p
 
 | Sketch              | Sensor        | IP          | MAC                | Max PSI | Sensor voltage range |
 |---------------------|---------------|-------------|--------------------|---------|----------------------|
-| ArduinoPSI_BoilerLoop | Fusch 100PSI  | 10.0.0.114  | c0:4e:30:11:6f:3c  | 100     | 0.5–4.5V             |
-| ArduinoPSI_Domestic   | Fusch 200PSI  | 10.0.0.219  | 34:b7:da:66:1e:50  | 200     | 0.5–5.0V             |
+| ArduinoPSI_BoilerLoop | Fusch 100PSI  | 10.0.0.219  | 34:b7:da:66:1e:50  | 100     | 0.5–4.5V             |
+| ArduinoPSI_Domestic   | Fusch 200PSI  | 10.0.0.114  | c0:4e:30:11:6f:3c  | 200     | 0.5–5.0V             |
 | (experimental)        | —             | 10.0.0.188  | 34:b7:da:65:99:1c  | —       | —                    |
 
 All boards have static IP addresses assigned via DHCP reservation on the router.
+
+> **IP/MAC mapping verified 2026-06-02** against the boards' USB serials and the
+> live readings (the `.219`/`34:b7:da:66:1e:50` board reports ~12 PSI — a hydronic
+> loop pressure — confirming the 100 PSI BoilerLoop firmware). An earlier version of
+> this table had the IP and MAC columns swapped between the two rows; do not re-invert.
+> The DS18B20 DHW-recirc sensor is on the **Domestic** board (`.114`) only. NB: the
+> pivac-side *module* names are inverted vs role (`pivac.ArduinoPSI` = DHW `.114`,
+> `pivac.ArduinoThermPSI` = boiler `.219`) — see pivac `CLAUDE.md`; the sketch names
+> here (Domestic = DHW, BoilerLoop = boiler) are correct.
 
 ## How It Works
 
@@ -49,6 +58,18 @@ When making logic changes, edit `ArduinoPSI_BoilerLoop/ArduinoPSI_impl.h` direct
 **`psiMax` resets on reboot only.** The sketch tracks the session maximum PSI and displays it on the LED matrix, but it is a runtime `float` variable and is lost when the board resets.
 
 **LED matrix display.** The matrix alternates every second between current PSI (e.g. ` 18`) and max PSI (e.g. `m42`).
+
+**Self-recovery (watchdog + escalating reconnect).** Both boards run an RA4M1
+hardware watchdog (`WDT`, 5 s) armed at the start of `setup()` and refreshed at
+the top of every `loop()`, so a fully wedged board self-resets within ~5 s.
+`connectWiFi()` is bounded (20 s budget, `WiFi.disconnect()` first, refreshes the
+watchdog while waiting); if a reconnect can't complete it calls
+`NVIC_SystemReset()` for a clean full reboot, which clears a wedged WiFi module
+far more reliably than repeated `WiFi.begin()`. The HTTP request loop is bounded
+(`HTTP_CLIENT_TIMEOUT_MS`, 2 s) so a stalled poller can't hang the board. This
+targets the observed failure where a board drops off WiFi after an AP/DHCP blip
+and never rejoins (requiring a manual power cycle). Tuning constants are in the
+`Reliability tuning` block in `ArduinoPSI_impl.h`.
 
 ## Deploying Changes
 

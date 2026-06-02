@@ -1,4 +1,4 @@
-// ArduinoPSI_Domestic — Fusch 200 PSI sensor, static IP 10.0.0.219
+// ArduinoPSI_Domestic — Fusch 200 PSI sensor, IP 10.0.0.114 (DHW board; DHCP-reserved by MAC)
 //
 // All shared logic lives in ArduinoPSI_impl.h. The only things that differ
 // between sketches are the two sensor constants defined below.
