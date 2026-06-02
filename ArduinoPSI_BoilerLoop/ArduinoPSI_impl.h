@@ -195,7 +195,11 @@ void loop() {
           client.println();
           client.println("<!DOCTYPE HTML>");
           client.println("<html>");
-          sprintf(jsonResponse, "{'psi' : %f}", psi);
+          // 'uptime_ms' (millis() since boot) lets the pivac side tell a
+          // self-reconnect (uptime keeps climbing) from a reboot/brownout
+          // (uptime resets to ~0). Extra key is harmless: pivac parses the
+          // line with ast.literal_eval and ignores keys it doesn't use.
+          sprintf(jsonResponse, "{'psi' : %f, 'uptime_ms' : %lu}", psi, millis());
           client.println(jsonResponse);
           client.println("</html>");
           break;
