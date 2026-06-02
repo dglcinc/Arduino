@@ -50,6 +50,18 @@ When making logic changes, edit `ArduinoPSI_BoilerLoop/ArduinoPSI_impl.h` direct
 
 **LED matrix display.** The matrix alternates every second between current PSI (e.g. ` 18`) and max PSI (e.g. `m42`).
 
+**Self-recovery (watchdog + escalating reconnect).** Both boards run an RA4M1
+hardware watchdog (`WDT`, 5 s) armed at the start of `setup()` and refreshed at
+the top of every `loop()`, so a fully wedged board self-resets within ~5 s.
+`connectWiFi()` is bounded (20 s budget, `WiFi.disconnect()` first, refreshes the
+watchdog while waiting); if a reconnect can't complete it calls
+`NVIC_SystemReset()` for a clean full reboot, which clears a wedged WiFi module
+far more reliably than repeated `WiFi.begin()`. The HTTP request loop is bounded
+(`HTTP_CLIENT_TIMEOUT_MS`, 2 s) so a stalled poller can't hang the board. This
+targets the observed failure where a board drops off WiFi after an AP/DHCP blip
+and never rejoins (requiring a manual power cycle). Tuning constants are in the
+`Reliability tuning` block in `ArduinoPSI_impl.h`.
+
 ## Deploying Changes
 
 Arduino sketches are deployed via the Arduino IDE (or Arduino CLI) — there is no OTA update mechanism. To update a board, connect via USB, open the sketch in the Arduino IDE, and upload. Before uploading, ensure `arduino_secrets.h` exists in the sketch folder with the correct credentials (it is gitignored, so a fresh clone will not have it — copy from `arduino_secrets.h.example`). The board's IP and WiFi credentials must match the router and pivac config.
