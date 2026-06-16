@@ -71,6 +71,34 @@ targets the observed failure where a board drops off WiFi after an AP/DHCP blip
 and never rejoins (requiring a manual power cycle). Tuning constants are in the
 `Reliability tuning` block in `ArduinoPSI_impl.h`.
 
+## Water-Meter RF Test Sketches (CC1101) — investigation retired
+
+Two extra sketches were added for the domestic water-meter project (see pivac
+`docs/water-meter-monitoring-plan.md`, Appendix A). They drive a **CC1101**
+sub-GHz radio on an UNO R4 WiFi via a 4-ch level shifter (SPI on D10–D13,
+GDO0 on D2). Both depend on **RadioLib** (`arduino-cli lib install RadioLib`,
+no `--libraries` flag needed).
+
+- **`CC1101_SpiDiag`** — raw-SPI bring-up tool. Resets the CC1101 and dumps
+  `VERSION`/`PARTNUM` + two default config regs to confirm the SPI link
+  (`VERSION=0x14 => SPI OK`). When a CC1101 won't talk: all-`0x00` = MISO low /
+  unpowered / not selected; all-`0xFF` = MISO floating.
+- **`CC1101_WaterMeterTest`** — RSSI carrier-sense burst detector. Joins WiFi,
+  serves live stats over HTTP (single-quoted dict at `http://<ip>/`), and
+  supports **over-the-air retune** via `http://<ip>/tune?mhz=NNN` (handy as a
+  generic 868/433/915 RF sniffer). Used on the experimental board (10.0.0.188).
+
+**Outcome (2026-06-16): RF approach abandoned.** The meter is a US-installed
+**Sensus iPerl FLX = FlexNet, 900 MHz, encrypted** — not EU wM-Bus 868 as the
+plan first assumed. FlexNet is proprietary/encrypted on licensed spectrum, so
+hobbyist RF decode (`rtlamr`) is infeasible. A 902–928 MHz sweep showed real
+activity (hotspots ~910/913/923/926 MHz) confirming the 900 MHz band, vs flat
+noise at 868/433. The project pivoted to **reading the meter LCD face with a
+camera (OCR — e.g. ESP32-CAM + `jomjol/AI-on-the-edge-device`)**. The sketches
+are kept as a working RF test bench. Wiring gotcha: the BSS138 shifter needs
+**LV(3V3)+HV(5V)+GND on both sides** powered (4 wires beyond the signal
+channels); a floating SCLK reads ~1.6 V instead of 0 V idle.
+
 ## Deploying Changes
 
 Arduino sketches are deployed via the Arduino IDE (or Arduino CLI) — there is no OTA update mechanism. To update a board, connect via USB, open the sketch in the Arduino IDE, and upload. Before uploading, ensure `arduino_secrets.h` exists in the sketch folder with the correct credentials (it is gitignored, so a fresh clone will not have it — copy from `arduino_secrets.h.example`). The board's IP and WiFi credentials must match the router and pivac config.
