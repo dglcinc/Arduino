@@ -61,12 +61,19 @@ uint32_t      windowStartPulses = 0;       // rolling flow window
 unsigned long windowStartMs     = 0;
 float         flowRateGpm       = 0.0f;
 
+// Run timer — time since flow was last 0. Driven by the same (flow > 0) test as
+// `flowing`, so it resets only when a full flow window sees no pulses.
+bool          isFlowing         = false;   // flowRateGpm > 0 last loop
+unsigned long flowStartMs       = 0;       // millis() when the current run began
+unsigned long runSeconds        = 0;       // seconds since flow was last 0 (0 when idle)
+
 char ssid[] = SECRET_SSID;
 char pass[] = SECRET_PASS;
 
-char jsonResponse[120];
+char jsonResponse[180];
 char output[120];
 char displayText[16];
+char runtimeStr[16];
 
 WiFiServer       server(80);
 ArduinoLEDMatrix matrix;
@@ -123,17 +130,20 @@ void sendHeaders(WiFiClient &client) {
 }
 
 // Status dict — single quotes are intentional (pivac uses ast.literal_eval).
-// volume = totalPulses * K; flowing derived; uptime_ms lets pivac tell a
-// self-reconnect (climbing) from a reboot (resets to ~0).
+// volume = totalPulses * K; flowing derived; run_s/runtime = time since flow was
+// last 0 (seconds + preformatted mm:ss for the WilhelmSK tile); uptime_ms lets
+// pivac tell a self-reconnect (climbing) from a reboot (resets to ~0).
 void sendStatus(WiFiClient &client) {
   float volume = totalPulses * K_GAL_PER_PULSE;
   int   flowing = (flowRateGpm > 0.0f) ? 1 : 0;
+  // mm:ss with uncapped minutes (e.g. "125:03") — single-quoted string value.
+  sprintf(runtimeStr, "%lu:%02lu", runSeconds / 60UL, runSeconds % 60UL);
   sendHeaders(client);
   client.println("<!DOCTYPE HTML>");
   client.println("<html>");
   sprintf(jsonResponse,
-          "{'flow' : %.2f, 'volume' : %.1f, 'flowing' : %d, 'uptime_ms' : %lu}",
-          flowRateGpm, volume, flowing, millis());
+          "{'flow' : %.2f, 'volume' : %.1f, 'flowing' : %d, 'run_s' : %lu, 'runtime' : '%s', 'uptime_ms' : %lu}",
+          flowRateGpm, volume, flowing, runSeconds, runtimeStr, millis());
   client.println(jsonResponse);
   client.println("</html>");
 }
@@ -232,6 +242,13 @@ void loop() {
     windowStartPulses = totalPulses;
     windowStartMs = nowMs;
   }
+
+  // Run timer — seconds since flow was last 0. Start the clock on a 0→flowing
+  // transition; hold it at 0 while idle. millis() subtraction is rollover-safe.
+  bool flowingNow = (flowRateGpm > 0.0f);
+  if (flowingNow && !isFlowing) flowStartMs = nowMs;
+  isFlowing  = flowingNow;
+  runSeconds = isFlowing ? (nowMs - flowStartMs) / 1000UL : 0UL;
 
   // Persist totalizer on a timer (never per-pulse — EEPROM wear).
   if (totalPulses != lastSavedTotal && nowMs - lastSaveMs >= EEPROM_SAVE_MS) saveTotal();
