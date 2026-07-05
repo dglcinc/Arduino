@@ -33,7 +33,9 @@ const float    K_GAL_PER_PULSE = 0.1f;     // DAE MJ-75a factory K-factor (±1.5
 const uint8_t  PIN_PULSE       = 2;        // reed, INPUT_PULLUP, FALLING edge
 
 const unsigned long DEBOUNCE_US    = 3000;        // reed bounce guard (~max 2 Hz)
-const unsigned long FLOW_WINDOW_MS = 10000UL;     // rolling flow-rate window
+const unsigned long FLOW_STOP_TIMEOUT_MS = 10000UL; // no pulse for this long => flow = 0
+                                                    // (bridges low-flow pulse gaps to ~0.6 gpm)
+const float         FLOW_EMA_ALPHA   = 0.4f;      // inter-pulse rate smoothing (higher = snappier)
 const unsigned long EEPROM_SAVE_MS = 300000UL;    // persist totalizer every 5 min
 
 // EEPROM layout (R4 renesas core writes through; no commit() needed)
@@ -57,13 +59,12 @@ uint32_t totalPulses     = 0;              // persisted lifetime total
 uint32_t lastSavedTotal  = 0;
 unsigned long lastSaveMs = 0;
 
-uint32_t      windowStartPulses = 0;       // rolling flow window
-unsigned long windowStartMs     = 0;
-float         flowRateGpm       = 0.0f;
+float         flowRateGpm       = 0.0f;    // smoothed instantaneous rate (gpm)
+unsigned long lastFlowPulseMs   = 0;       // millis() of most recent pulse (flow detection)
 
-// Run timer — time since flow was last 0. Driven by the same (flow > 0) test as
-// `flowing`, so it resets only when a full flow window sees no pulses.
-bool          isFlowing         = false;   // flowRateGpm > 0 last loop
+// Run timer — time since flow was last 0. Fires on the FIRST pulse (no window to
+// wait out), resets FLOW_STOP_TIMEOUT_MS after the last pulse.
+bool          isFlowing         = false;   // pulse seen within the stop timeout
 unsigned long flowStartMs       = 0;       // millis() when the current run began
 unsigned long runSeconds        = 0;       // seconds since flow was last 0 (0 when idle)
 
@@ -135,7 +136,7 @@ void sendHeaders(WiFiClient &client) {
 // pivac tell a self-reconnect (climbing) from a reboot (resets to ~0).
 void sendStatus(WiFiClient &client) {
   float volume = totalPulses * K_GAL_PER_PULSE;
-  int   flowing = (flowRateGpm > 0.0f) ? 1 : 0;
+  int   flowing = isFlowing ? 1 : 0;
   // mm:ss with uncapped minutes (e.g. "125:03") — single-quoted string value.
   sprintf(runtimeStr, "%lu:%02lu", runSeconds / 60UL, runSeconds % 60UL);
   sendHeaders(client);
@@ -159,7 +160,6 @@ void sendOk(WiFiClient &client, const char *msg) {
 void handleRequest(WiFiClient &client, const char *reqLine) {
   if (strstr(reqLine, "GET /reset?confirm=1")) {
     totalPulses = 0; saveTotal();
-    windowStartPulses = 0;
     Serial.println("Totalizer RESET");
     sendOk(client, "{'reset' : 1}");
   } else {
@@ -209,8 +209,6 @@ void setup() {
   printWifiStatus();
   matrix.begin();
 
-  windowStartMs     = millis();
-  windowStartPulses = totalPulses;
   lastSaveMs        = millis();
 }
 
@@ -233,20 +231,28 @@ void loop() {
   interrupts();
   totalPulses += pc;
 
-  // Rolling flow rate over FLOW_WINDOW_MS.
+  // Instantaneous flow — updated on every pulse from the inter-pulse interval, so
+  // flow appears within one pulse of water moving instead of waiting out a window.
   unsigned long nowMs = millis();
-  if (nowMs - windowStartMs >= FLOW_WINDOW_MS) {
-    uint32_t dp = totalPulses - windowStartPulses;
-    float minutes = (nowMs - windowStartMs) / 60000.0f;
-    flowRateGpm = (minutes > 0.0f) ? (dp * K_GAL_PER_PULSE) / minutes : 0.0f;
-    windowStartPulses = totalPulses;
-    windowStartMs = nowMs;
+  if (pc > 0) {
+    if (lastFlowPulseMs != 0) {
+      unsigned long interval = nowMs - lastFlowPulseMs;      // ms since previous pulse
+      if (interval > 0) {
+        float inst = (K_GAL_PER_PULSE * 60000.0f) / (float)interval;   // gpm
+        flowRateGpm = flowRateGpm * (1.0f - FLOW_EMA_ALPHA) + inst * FLOW_EMA_ALPHA;
+      }
+    }
+    lastFlowPulseMs = nowMs;
   }
 
-  // Run timer — seconds since flow was last 0. Start the clock on a 0→flowing
-  // transition; hold it at 0 while idle. millis() subtraction is rollover-safe.
-  bool flowingNow = (flowRateGpm > 0.0f);
-  if (flowingNow && !isFlowing) flowStartMs = nowMs;
+  // Flow is "on" from the first pulse until FLOW_STOP_TIMEOUT_MS with no pulse
+  // (the timeout bridges the gaps between pulses at low flow). Zero the rate on stop.
+  bool flowingNow = (lastFlowPulseMs != 0) && (nowMs - lastFlowPulseMs < FLOW_STOP_TIMEOUT_MS);
+  if (!flowingNow) flowRateGpm = 0.0f;
+
+  // Run timer — starts on the first pulse (flow 0→1), holds at 0 while idle.
+  // millis() subtraction is rollover-safe.
+  if (flowingNow && !isFlowing) flowStartMs = lastFlowPulseMs;
   isFlowing  = flowingNow;
   runSeconds = isFlowing ? (nowMs - flowStartMs) / 1000UL : 0UL;
 
