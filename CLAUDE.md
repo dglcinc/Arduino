@@ -71,6 +71,26 @@ targets the observed failure where a board drops off WiFi after an AP/DHCP blip
 and never rejoins (requiring a manual power cycle). Tuning constants are in the
 `Reliability tuning` block in `ArduinoPSI_impl.h`.
 
+## Chiltrix CX75 Modbus Sketches
+
+Three sketches for the Chiltrix chiller's RS-485 link, all on an UNO R4 plus a DFRobot **DFR0259** shield (both DIP switches AUTO and ON). They are a different shape from the PSI sketches: no shared header, no LED matrix, and `ChiltrixModbus` is the only one that touches WiFi.
+
+| Sketch | Purpose |
+|--------|---------|
+| `ChiltrixModbus` | The production bridge — polls the chiller and serves one pseudo-JSON line for pivac, same convention as the PSI boards |
+| `ChiltrixScan`   | Interactive scanner over USB serial, for confirming addresses and hunting the ones Chiltrix does not document |
+| `RS485Blast`     | Diagnostic only — saturates the driver so a DC meter can tell "shield transmitting" from "shield mute" |
+
+**Link settings are fixed by Chiltrix:** Modbus RTU, 9600 8N1, slave ID 1, function 03.
+
+**Wiring is `A3` and `B3` on the chiller, A/B only, with no ground at the Arduino.** The cable drain stays grounded at the chiller end alone. **Fail-safe bias must stay fitted at the Arduino end** — 680 Ω from +5 V to A and 680 Ω from B to GND — because the DFR0259 has no bias network and tri-states its driver between frames, which leaves the pair floating around 10 mV and the receiver free-running on noise. Do not add a terminator; it fights the bias resistors.
+
+**Register addresses come from Chiltrix's own document**, `Cx34-1,2,3/Cx50-2/Cx35-1 Modbus Protocol and Connections Lists`, filed in `~/OneDrive - DGLC/Claude/HVAC Manuals/`. It contradicts the jasipsw CX50-2 community map on every address the two share, so only the documented thirteen are polled. It documents no operating-state or fault-code register; `ChiltrixScan` lists candidates for those but nothing reaches Signal K unconfirmed.
+
+**Both these sketches are read-only — function code 3, never 6 or 16.** Registers 140–146 are writable on the chiller and include the cooling target and the on/off switch. pivac is a monitoring system.
+
+Building `ChiltrixModbus` needs the `ModbusMaster` library (`arduino-cli lib install ModbusMaster`) and an `arduino_secrets.h` in its folder; `ChiltrixScan` and `RS485Blast` need neither WiFi nor credentials.
+
 ## Deploying Changes
 
 Arduino sketches are deployed via the Arduino IDE (or Arduino CLI) — there is no OTA update mechanism. To update a board, connect via USB, open the sketch in the Arduino IDE, and upload. Before uploading, ensure `arduino_secrets.h` exists in the sketch folder with the correct credentials (it is gitignored, so a fresh clone will not have it — copy from `arduino_secrets.h.example`). The board's IP and WiFi credentials must match the router and pivac config.

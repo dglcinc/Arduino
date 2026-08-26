@@ -5,13 +5,20 @@
  * serial monitor at 115200.  No WiFi, no pivac.  Its only job is to find the
  * unit and identify which register is which.
  *
- * Why this exists: two community register maps disagree on nearly every
- * address.  jasipsw/homeassistant-chiltrix-modbus (CX50-2) calls 202 water
- * inlet; gonzojive/heatpump (CX34) calls it ambient.  Neither covers a CX75.
- * Only the unit settles it.
+ * Why this exists: Chiltrix's own document now settles the addresses that
+ * matter, but it lists only thirteen registers and omits the two this system
+ * most wants - an operating state and a fault code.  So the job has changed
+ * from "which community map applies" to "confirm the documented addresses,
+ * then hunt the ones the document leaves out".
  *
- * Chiltrix's own ProtoAir gateway guide specifies Modbus RTU 9600/N/8/1 and
- * Node-ID 1 for a single chiller, so that is where the probe starts.
+ * The document is "Cx34-1,2,3/Cx50-2/Cx35-1 Modbus Protocol and Connections
+ * Lists" (~/OneDrive - DGLC/Claude/HVAC Manuals/).  It specifies Modbus RTU
+ * 9600/N/8/1, slave ID 1, function 03, which is where the probe starts.
+ *
+ * It agrees with gonzojive/heatpump (CX34) and contradicts
+ * jasipsw/homeassistant-chiltrix-modbus (CX50-2) on every address the two
+ * share, so treat any surviving jasipsw address below as a guess and nothing
+ * more.  Neither map covers a CX75; only the unit settles it.
  *
  * READ ONLY.  Function code 3 exclusively.  Writing to a misidentified
  * register can move a setpoint or a protection limit.
@@ -35,40 +42,47 @@ const uint8_t  NBAUDS  = sizeof(BAUDS) / sizeof(BAUDS[0]);
 uint32_t curBaud = 9600;
 uint8_t  curId   = 1;
 
-// ---- what the two maps claim, for the addresses that matter -----------------
-struct Label { uint16_t addr; const char *cx50; const char *cx34; };
+// ---- what each address is ---------------------------------------------------
+// `doc` is Chiltrix's own document and is authoritative.  `guess` is the
+// community maps, kept only for the addresses the document does not cover.
+// Where the two columns disagree, the document wins.
+struct Label { uint16_t addr; const char *doc; const char *guess; };
 const Label LABELS[] = {
-  {  53, "",                  "P53 EC pump min speed" },
-  {  59, "",                  "P59 antifreeze?"       },
-  {  65, "",                  "P65 min water flow?"   },
-  { 109, "",                  "P109 target range?"    },
-  { 140, "",                  "on/off"                },
-  { 141, "",                  "AC mode 0=cool 1=heat" },
-  { 142, "",                  "target cool temp"      },
-  { 202, "water inlet T",     "ambient T"             },
-  { 203, "water outlet T",    "suction T"             },
-  { 204, "ambient T",         "plate HX T"            },
-  { 205, "coil T",            "AC outlet water T"     },
-  { 206, "discharge T",       "solar T"               },
-  { 207, "suction T",         ""                      },
-  { 209, "SETPOINT T",        "compressor current"    },
-  { 213, "DHW setpoint",      "WATER FLOW RATE"       },
-  { 214, "ANTIFREEZE T (P59)", "P03 status"           },
-  { 225, "",                  "inner water flow sw"   },
-  { 227, "",                  "compressor frequency"  },
-  { 243, "operating state",   "indoor temp ctrl sw"   },
-  { 244, "error code",        "fan type"              },
-  { 248, "",                  "internal pump speed"   },
-  { 256, "current power W",   "input AC current"      },
-  { 257, "FLOW RATE 0.1L/min", "compressor phase I"   },
-  { 258, "compressor speed %", "bus line voltage"     },
-  { 259, "fan speed %",       "fan shutdown code"     },
-  { 260, "pump speed %",      "IPM temp"              },
-  { 261, "system pressure",   "compressor run hours"  },
-  { 264, "run hours (u32)",   ""                      },
-  { 281, "comp starts (u32)", "water inlet sensor 1"  },
-  { 284, "",                  "current fault code"    },
-  { 285, "defrost count",     ""                      },
+  {  53, "",                     "P53 EC pump min speed"     },
+  {  59, "",                     "P59 antifreeze?"           },
+  {  65, "",                     "P65 min water flow?"       },
+  { 109, "",                     "P109 target range?"        },
+  { 140, "SWITCH on/off R/W",    ""                          },
+  { 141, "MODE 0c 1h 2d 3cd 4hd", ""                         },
+  { 142, "AC COOL TARGET C R/W", ""                          },
+  { 143, "AC HEAT TARGET C R/W", ""                          },
+  { 144, "DHW TARGET C R/W",     ""                          },
+  { 145, "AC heat AU mode R/W",  ""                          },
+  { 146, "DHW AU mode R/W",      ""                          },
+  { 202, "AMBIENT AIR T x0.1C",  "cx50 said water inlet"     },
+  { 203, "",                     "cx50 outlet / cx34 suction" },
+  { 204, "",                     "cx50 ambient / cx34 plate HX" },
+  { 205, "OUTLET WATER T x0.1C", "cx50 said coil T"          },
+  { 206, "",                     "cx50 discharge / cx34 solar" },
+  { 207, "",                     "cx50 suction T"            },
+  { 209, "",                     "cx50 setpoint / cx34 comp I" },
+  { 213, "WATER FLOW L/min",     "cx50 said DHW setpoint"    },
+  { 214, "",                     "cx50 antifreeze / cx34 P03" },
+  { 225, "",                     "cx34 inner water flow sw"  },
+  { 227, "COMPRESSOR FREQ Hz",   ""                          },
+  { 243, "",                     "cx50 operating state"      },
+  { 244, "",                     "cx50 error code"           },
+  { 248, "",                     "cx34 internal pump speed"  },
+  { 256, "INPUT AC CURRENT A",   "cx50 said power W"         },
+  { 257, "",                     "cx50 flow / cx34 comp phase I" },
+  { 258, "",                     "cx50 comp speed % / cx34 bus V" },
+  { 259, "",                     "cx50 fan speed %"          },
+  { 260, "",                     "cx50 pump speed % / cx34 IPM T" },
+  { 261, "",                     "cx50 pressure / cx34 run hours" },
+  { 264, "",                     "cx50 run hours (u32)"      },
+  { 281, "INLET WATER T x0.1C",  "cx50 said comp starts"     },
+  { 284, "",                     "cx34 current fault code"   },
+  { 285, "",                     "cx50 defrost count"        },
 };
 const uint8_t NLABELS = sizeof(LABELS) / sizeof(LABELS[0]);
 
@@ -143,8 +157,9 @@ void probe(uint8_t idFrom, uint8_t idTo) {
       Serial.println(F("no"));
     }
   }
-  Serial.println(F("\nnothing answered. check: A/B swapped, GND connected,"));
-  Serial.println(F("DE pin correct, and that you are on the BMS terminals.\n"));
+  Serial.println(F("\nnothing answered. the pair is A3 and B3 on the chiller, A/B only,"));
+  Serial.println(F("NO ground at the Arduino. check: A/B swapped, DE pin correct, and"));
+  Serial.println(F("that the 680R fail-safe bias is still fitted at this end.\n"));
   curBaud = 9600; curId = 1; applyLink();
 }
 
@@ -172,8 +187,8 @@ void printRow(uint16_t addr, uint16_t raw) {
   Serial.print(raw / 10.0f, 1); Serial.print(F("L/m\t"));
   const Label *l = lookup(addr);
   if (l) {
-    Serial.print(F("cx50:")); Serial.print(l->cx50);
-    Serial.print(F("  cx34:")); Serial.print(l->cx34);
+    if (l->doc[0])   { Serial.print(F("DOC:"));    Serial.print(l->doc); }
+    if (l->guess[0]) { Serial.print(F("  guess:")); Serial.print(l->guess); }
   }
   Serial.println();
 }
@@ -196,51 +211,107 @@ void scan(uint16_t from, uint16_t to) {
   Serial.print(F(" of ")); Serial.print(to - from + 1); Serial.println(F(" addresses returned a value\n"));
 }
 
-// The checks with answers you already know.  This is the fastest route to
-// deciding which map applies.
-void known() {
+// Print one temperature register in both scales.
+void showTemp(const __FlashStringHelper *what, uint16_t addr) {
   uint16_t v;
-  Serial.println(F("\n--- checks against values you already know ---\n"));
+  Serial.print(F("reg ")); Serial.print(addr); Serial.print(F("  ")); Serial.print(what);
+  if (readOne(addr, &v)) {
+    float c = (int16_t)v / 10.0f;
+    Serial.print(c, 1); Serial.print(F(" C / ")); Serial.print(c * 9 / 5 + 32, 1); Serial.println(F(" F"));
+  } else Serial.println(F("no response"));
+}
 
-  Serial.print(F("reg 53   expect 40 if P-numbers are register addresses : "));
-  if (readOne(53, &v)) {
+// The documented registers, each against a value you can already see, plus the
+// two scales the document leaves unstated.  Run this first once the unit
+// answers; it is the fastest route to trusting the map.
+void known() {
+  uint16_t v, in = 0, out = 0;
+  bool haveIn = false, haveOut = false;
+
+  Serial.println(F("\n--- documented registers vs values you already know ---\n"));
+
+  Serial.print(F("reg 140  switch, expect 1 while running              : "));
+  if (readOne(140, &v)) Serial.println(v); else Serial.println(F("no response"));
+
+  Serial.print(F("reg 141  mode 0=cool 1=heat 2=DHW 3=c+D 4=h+D        : "));
+  if (readOne(141, &v)) Serial.println(v); else Serial.println(F("no response"));
+
+  Serial.print(F("reg 142  AC COOL TARGET, expect 10 (whole C = 50F)   : "));
+  if (readOne(142, &v)) {
     Serial.print(v);
-    Serial.println(v == 40 ? F("   <== MATCH. try 59 (P59), 65 (P65), 109 (P109)") : F("   no match"));
+    Serial.println(v == 10 ? F("   <== MATCHES the panel target") : F("   check the panel"));
   } else Serial.println(F("no response"));
 
-  Serial.print(F("reg 59   P59 antifreeze, expect 30 (3.0C)             : "));
+  Serial.println();
+  showTemp(F("INLET water  vs C04 on panel        : "), 281);
+  showTemp(F("OUTLET water vs C05 on panel        : "), 205);
+  showTemp(F("AMBIENT air  vs the outdoor reading : "), 202);
+
+  // Inlet is the return from the house and runs warmer than outlet in cooling.
+  // A negative delta here means the two addresses are swapped, or the unit is
+  // in heating.  Expect roughly 2-4 C at part load, 4.1 C at full output.
+  if (readOne(281, &in))  haveIn  = true;
+  if (readOne(205, &out)) haveOut = true;
+  if (haveIn && haveOut) {
+    float dt = ((int16_t)in - (int16_t)out) / 10.0f;
+    Serial.print(F("\nevaporator delta-T (281 - 205)                       : "));
+    Serial.print(dt, 1); Serial.print(F(" C / ")); Serial.print(dt * 9 / 5, 1); Serial.println(F(" F"));
+    Serial.println(F("  positive in cooling. negative = swapped addresses, or heating."));
+  }
+
+  Serial.println(F("\n--- the two scales the document does not state ---\n"));
+
+  Serial.print(F("reg 213  WATER FLOW vs C13 on the panel              : "));
+  if (readOne(213, &v)) {
+    Serial.print(F("raw ")); Serial.print(v);
+    Serial.print(F("  -> ")); Serial.print(v); Serial.print(F(" or "));
+    Serial.print(v / 10.0f, 1); Serial.println(F(" L/min"));
+    Serial.println(F("  C13 read >54 after the strainer was cleaned; P65 trips at 20."));
+    Serial.println(F("  C13 reads 0 at idle, so take this in the pump-only window."));
+  } else Serial.println(F("no response"));
+
+  Serial.print(F("\nreg 256  INPUT AC CURRENT vs Emporia / 240 V         : "));
+  if (readOne(256, &v)) {
+    Serial.print(F("raw ")); Serial.print(v);
+    Serial.print(F("  -> ")); Serial.print(v); Serial.print(F(" or "));
+    Serial.print(v / 10.0f, 1); Serial.println(F(" A"));
+    Serial.println(F("  running power is 1400-1600 W, so expect about 6 A."));
+  } else Serial.println(F("no response"));
+
+  Serial.print(F("\nreg 227  COMPRESSOR FREQ, 0 idle, up to 80 Hz        : "));
+  if (readOne(227, &v)) Serial.println(v); else Serial.println(F("no response"));
+
+  Serial.println(F("\n--- what the document omits, and this system wants ---\n"));
+
+  Serial.print(F("reg 53   expect 40 if P-numbers are register addrs   : "));
+  if (readOne(53, &v)) {
+    Serial.print(v);
+    Serial.println(v == 40 ? F("   <== MATCH. P59, P65, P109 are then readable")
+                           : F("   no match; P-parameters are elsewhere"));
+  } else Serial.println(F("no response"));
+
+  Serial.print(F("reg 59   P59 antifreeze, expect 30 (3.0C)            : "));
   if (readOne(59, &v)) Serial.println(v); else Serial.println(F("no response"));
 
-  Serial.print(F("reg 65   P65 min flow, expect 20 (L/min)              : "));
+  Serial.print(F("reg 65   P65 min water flow, expect 20               : "));
   if (readOne(65, &v)) Serial.println(v); else Serial.println(F("no response"));
 
-  Serial.print(F("reg 109  P109 range gate, expect 1                    : "));
+  Serial.print(F("reg 109  P109 range gate, expect 1                   : "));
   if (readOne(109, &v)) Serial.println(v); else Serial.println(F("no response"));
 
-  Serial.println();
-  Serial.print(F("reg 257  cx50 says flow; compare against C13 on panel : "));
-  if (readOne(257, &v)) { Serial.print(v); Serial.print(F("  = ")); Serial.print(v/10.0f,1); Serial.println(F(" L/min")); }
-  else Serial.println(F("no response"));
+  Serial.println(F("\nfault and state are NOT in the document. candidates:"));
+  Serial.print(F("reg 243  cx50 called this operating state           : "));
+  if (readOne(243, &v)) Serial.println(v); else Serial.println(F("no response"));
+  Serial.print(F("reg 244  cx50 called this error code                : "));
+  if (readOne(244, &v)) Serial.println(v); else Serial.println(F("no response"));
+  Serial.print(F("reg 284  cx34 called this current fault code        : "));
+  if (readOne(284, &v)) Serial.println(v); else Serial.println(F("no response"));
+  Serial.println(F("  the way to settle these is to read them while the panel shows"));
+  Serial.println(F("  a known alarm - P5 low flow or E14 antifreeze - not while idle.\n"));
 
-  Serial.print(F("reg 213  cx34 says flow; compare against C13 on panel : "));
-  if (readOne(213, &v)) { Serial.print(v); Serial.print(F("  = ")); Serial.print(v/10.0f,1); Serial.println(F(" L/min")); }
-  else Serial.println(F("no response"));
-
-  Serial.println();
-  Serial.print(F("reg 202  vs C04 inlet on panel                        : "));
-  if (readOne(202, &v)) { Serial.print((int16_t)v/10.0f,1); Serial.print(F("C / ")); Serial.print((int16_t)v/10.0f*9/5+32,1); Serial.println(F("F")); }
-  else Serial.println(F("no response"));
-
-  Serial.print(F("reg 203  vs C05 outlet on panel                       : "));
-  if (readOne(203, &v)) { Serial.print((int16_t)v/10.0f,1); Serial.print(F("C / ")); Serial.print((int16_t)v/10.0f*9/5+32,1); Serial.println(F("F")); }
-  else Serial.println(F("no response"));
-
-  Serial.print(F("reg 209  cx50 says setpoint, expect 100 (10.0C)       : "));
-  if (readOne(209, &v)) Serial.println((int16_t)v); else Serial.println(F("no response"));
-
-  Serial.println(F("\nwhichever register reads close to a number on the panel is the"));
-  Serial.println(F("one that means what the panel says. if a value looks off by one"));
-  Serial.println(F("address, try +/-1 for the 0-based vs 1-based ambiguity.\n"));
+  Serial.println(F("a register that reads close to a number on the panel means what the"));
+  Serial.println(F("panel says. if a value looks off by one address, try +/-1 for the"));
+  Serial.println(F("0-based vs 1-based ambiguity.\n"));
 }
 
 // Repeatedly read a handful of addresses so you can watch which one tracks a
@@ -300,10 +371,10 @@ void menu() {
   Serial.println(F("  d <n>        set DE pin, -1 for auto"));
   Serial.println(F("  p            probe id 1 at every baud   (then this)"));
   Serial.println(F("  P            probe id 1-32 at every baud (slow, minutes)"));
-  Serial.println(F("  k            known-value checks         (do this second)"));
+  Serial.println(F("  k            documented-register checks (do this second)"));
   Serial.println(F("  s            scan 0-400"));
   Serial.println(F("  s <a> <b>    scan a range"));
-  Serial.println(F("  w            watch 202 203 257 213 256"));
+  Serial.println(F("  w            watch 281 205 213 227 256 (in/out/flow/Hz/A)"));
   Serial.println(F("  w <a> ...    watch up to 6 addresses"));
   Serial.println(F("  b <baud>     set baud"));
   Serial.println(F("  i <id>       set slave id"));
@@ -335,7 +406,7 @@ void handle(char *line) {
   if (cmd == 'w') {
     uint16_t addrs[6]; uint8_t n = 0;
     if (*arg) { char *t = strtok(arg, " "); while (t && n < 6) { addrs[n++] = atoi(t); t = strtok(NULL, " "); } }
-    else { uint16_t d[] = {202, 203, 257, 213, 256}; for (n = 0; n < 5; n++) addrs[n] = d[n]; }
+    else { uint16_t d[] = {281, 205, 213, 227, 256}; for (n = 0; n < 5; n++) addrs[n] = d[n]; }
     watch(addrs, n); return;
   }
   Serial.println(F("? for the menu"));
