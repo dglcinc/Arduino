@@ -165,9 +165,18 @@ void probe(uint8_t idFrom, uint8_t idTo) {
 
 // ---- reading ----------------------------------------------------------------
 // Returns true and sets *out on success; prints the failure otherwise.
+uint8_t lastRc = 0;    // failure code of the most recent readOne, for watch()
+
 bool readOne(uint16_t addr, uint16_t *out) {
+  // Modbus RTU requires >= 3.5 character times of silence between frames --
+  // ~4 ms at 9600.  Measured live on the CX75: back-to-back reads lost about
+  // 40% of transactions to timeouts, while the same addresses read through
+  // this gap returned 100%.  The gap belongs here rather than at each call
+  // site, so every path gets it.
+  delay(15);
   node.clearResponseBuffer();
   uint8_t rc = node.readHoldingRegisters(addr, 1);
+  lastRc = rc;
   if (rc == node.ku8MBSuccess) { *out = node.getResponseBuffer(0); return true; }
   return false;
 }
@@ -205,7 +214,6 @@ void scan(uint16_t from, uint16_t to) {
   uint16_t hits = 0, v;
   for (uint16_t a = from; a <= to; a++) {
     if (readOne(a, &v)) { printRow(a, v); hits++; }
-    delay(15);                       // >= 3.5 char times between frames
   }
   Serial.print(F("\n")); Serial.print(hits);
   Serial.print(F(" of ")); Serial.print(to - from + 1); Serial.println(F(" addresses returned a value\n"));
@@ -325,9 +333,11 @@ void watch(uint16_t *addrs, uint8_t n) {
     Serial.print(millis() / 1000); Serial.print(F("\t"));
     for (uint8_t i = 0; i < n; i++) {
       uint16_t v;
-      if (readOne(addrs[i], &v)) Serial.print((int16_t)v); else Serial.print(F("--"));
+      if (readOne(addrs[i], &v)) Serial.print((int16_t)v);
+      else if (lastRc == 0xE2) Serial.print(F("TMO"));
+      else if (lastRc == 0xE3) Serial.print(F("CRC"));
+      else { Serial.print(F("E")); Serial.print(lastRc, HEX); }
       Serial.print(F("\t"));
-      delay(15);
     }
     Serial.println();
     delay(2000);

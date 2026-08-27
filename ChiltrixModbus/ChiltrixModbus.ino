@@ -22,18 +22,33 @@
  * this system keeps getting bitten by.  ChiltrixScan still lists them as
  * candidates to hunt; nothing reaches Signal K until it is confirmed.
  *
- * ---- wiring ----------------------------------------------------------------
- * A3 and B3 on the chiller, and NO ground.  A/B only; leave the cable drain
- * grounded at the chiller end alone and off the Arduino.  Fail-safe bias stays
- * fitted at the Arduino end (680R +5V->A, 680R B->GND) because the DFR0259 has
- * no bias network and tri-states the driver between frames.
+ * CONFIRMED AGAINST THE UNIT 2026-08-26, not just against the document:
+ *   142 read 10, matching the 50 F panel target exactly.
+ *   202 read 23.9 C against RedLink's outdoor sensor at 23.89 C - two
+ *       unrelated sensors agreeing to 0.01 C, which also refutes jasipsw's
+ *       claim that 202 is inlet water (inlet was 6.8 C at the time).
+ *   281 and 205 tracked the controller's own inlet and outlet displays to
+ *       within 0.4 F once the loop was thermally stable.  Comparisons taken
+ *       during a transient disagree by degrees - the outlet moved 4.7 to
+ *       9.8 C in three minutes after the compressor stopped - so compare at
+ *       idle, not while it is still settling.
+ *   227 and 256 both fell to 0 together when the compressor stopped, and
+ *       inlet and outlet began converging with the pump still running.  The
+ *       map predicts the physics, which no document comparison can do.
  *
- * Expect the idle A-B voltage to CHANGE when the wires move to A3/B3, and do
- * not read that as a fault.  On the old DA1/DA2 pair it sat at 0.44 V, which
- * solves to a ~120R terminator at the far end.  An unterminated pair loads the
- * bias divider only with the transceiver's ~12k, so several volts is the normal
- * reading there.  Anything comfortably above the 200 mV receiver threshold is
- * fine.  Do not add a terminator - it fights the bias resistors.
+ * ---- wiring ----------------------------------------------------------------
+ * A3 and B3 on the chiller.  NO ground at the Arduino, NO bias resistors, NO
+ * terminator.  A/B only; leave the cable drain grounded at the chiller end
+ * alone.  This is measured, not assumed: as wired above, a 135-read soak on
+ * 2026-08-26 lost 2 frames, 1.5%, and both were in the first row before the
+ * link settled.  The chiller biases this pair itself, which the old DA1/DA2
+ * pair did not - do not refit the 680R network that pair needed.
+ *
+ * The idle A-B voltage on A3/B3 reads about 3.18 V, against 0.44 V on DA1/DA2.
+ * That is not a fault; it is what tells you the two pairs are different
+ * circuits.  0.44 V solves to a ~120R terminator at the far end, while 3.18 V
+ * solves to roughly 2.4k, which is receiver-scale loading.  Anything
+ * comfortably above the 200 mV receiver threshold is fine.
  */
 
 #include <WiFiS3.h>
@@ -63,16 +78,23 @@
 #define REG_WATER_IN     281      // int16, x0.1 C
 
 // Two scales the document does not state.  It writes "(to get C divide by 10)"
-// against every temperature and says nothing against these two, so raw units
-// are what it implies.  Both have a free cross-check:
-//   flow    -> C13 on the controller, read in the 1-2 minute pump-only window
-//              at the start of a call.  It read >54 L/min after the Y-strainer
-//              was cleaned, and P65 trips the P5 alarm at 20.
-//   current -> electrical.emporia.house.chiltrix in Signal K, divided by 240 V.
-//              Running power averages 1400-1600 W, so expect roughly 6 A.
-// If either comes back 10x high, change its scale here to 0.1f.
-#define FLOW_SCALE       1.0f
-#define CURRENT_SCALE    1.0f
+// against every temperature and says nothing against these two.
+//
+// FLOW is SETTLED at 0.1, measured against the panel on 2026-08-26: register
+// 213 read raw 69 while the controller showed 1.8 gpm.  69 * 0.1 = 6.9 L/min
+// = 1.82 gpm, a 1% agreement.  Running, it read 505 and 517 -> 50.5-51.7
+// L/min, consistent with the >54 L/min measured after the Y-strainer was
+// cleaned and the only reading inside the document's own 0-100 L/min range.
+// Raw would have published 10x high.  P65 trips P5 at 20 L/min.
+//
+// CURRENT is SETTLED at 0.1, measured against Emporia on 2026-08-26 with the
+// compressor at 55 Hz: register 256 read 109 while
+// electrical.emporia.house.chiltrix read 2660.5 W.  109 * 0.1 = 10.9 A, and
+// 10.9 * 240 = 2616 W - a 1.7% agreement.  Raw would have been 109 A = 26 kW,
+// four times the whole house main.  It reads 0 whenever the compressor is
+// stopped, which is correct, so it can only be checked during a run.
+#define FLOW_SCALE       0.1f
+#define CURRENT_SCALE    0.1f
 
 // One bit per Modbus transaction, so a partly failed poll is visible in the
 // payload instead of hiding behind held values.
