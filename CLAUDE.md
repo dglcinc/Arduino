@@ -19,6 +19,7 @@ All boards are **Arduino UNO R4 WiFi**. The pressure sensor connects to analog p
 | ArduinoPSI_BoilerLoop | Fusch 100PSI  | 10.0.0.219  | 34:b7:da:66:1e:50  | 100     | 0.5–4.5V             |
 | ArduinoPSI_Domestic   | Fusch 200PSI  | 10.0.0.114  | c0:4e:30:11:6f:3c  | 200     | 0.5–5.0V             |
 | DomesticWater         | DAE MJ-75a meter | 10.0.0.188 | 34:b7:da:65:99:1c | —       | reed on D2 (not A0)  |
+| AirHandler_MBR        | 2× DS18B20 on D2, 2× 10K NTC on A0/A1, Y2 relay on D8 | 10.0.0.180 | e8:f6:0a:aa:a3:88 | — | PROTO-SHIELD; 24 VAC buck converter (4.65 V at the shield) |
 
 All boards have static IP addresses assigned via DHCP reservation on the router.
 
