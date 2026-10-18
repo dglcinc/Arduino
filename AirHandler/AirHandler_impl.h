@@ -100,7 +100,10 @@ float ntcF(float counts) {
 
 float dsRead(const DeviceAddress rom, int index) {
   float f = romsByIndex ? ds.getTempFByIndex(index) : ds.getTempF(rom);
-  if (f == DEVICE_DISCONNECTED_F || f == 185.0f) return NAN;
+  // DEVICE_DISCONNECTED_F is a double expression (-196.6) and never compares equal to the float the
+  // library returns, so test by range: nothing real reads below -100 F. 185.0 F is the 85 C power-on
+  // value of a probe that has not converted yet.
+  if (f < -100.0f || fabsf(f - 185.0f) < 0.01f) return NAN;
   return f;
 }
 
@@ -147,8 +150,11 @@ bool connectWiFi(unsigned long budgetMs) {
   unsigned long start = millis();
   Serial.print("Connecting to SSID: ");
   Serial.println(ssid);
+  WDT.refresh();
   WiFi.disconnect();
-  WiFi.setHostname(HOSTNAME);
+  // No WiFi.setHostname(): on the R4 WiFi it blocks for more than the 5 s watchdog and the board
+  // reboots in a loop (bench, 2026-10-18). Name the client on the UCG instead.
+  WDT.refresh();
   WiFi.begin(ssid, pass);
   while (WiFi.status() != WL_CONNECTED) {
     if (millis() - start > budgetMs) return false;
