@@ -49,6 +49,14 @@ All shared logic lives in `ArduinoPSI_BoilerLoop/ArduinoPSI_impl.h`. The copy in
 
 When making logic changes, edit `ArduinoPSI_BoilerLoop/ArduinoPSI_impl.h` directly. The symlink means the Domestic sketch always picks up the same file automatically. The diff between the two `.ino` files should always be just those two constant values.
 
+### Air-handler nodes
+
+`AirHandler/AirHandler_impl.h` holds all logic for the air-handler nodes. Each zone has its own folder, starting with `AirHandler_MBR/`, holding a symlink to that header and a `.ino` that defines only `ZONE_TAG`, `HOSTNAME`, the two DS18B20 ROMs and the NTC constants. The design is in pivac's `docs/mbr-air-handler-node-plan.md` §4, and the shield wiring in `docs/mbr-air-handler-node-shield-review.md`. The node reads water supply and return on D2, return air on A0, supply air on A1 and the Y2 contact on D8. It serves `{'wsup' : …, 'wret' : …, 'aret' : …, 'asup' : …, 'y2' : …, 'y2_s' : …, 'rssi' : …, 'uptime_ms' : …}` and leaves out any sensor that failed to read. It prints the bus ROMs and raw counts for ten seconds at boot, before WiFi. While the zone file's ROMs are all zero, it reads the first two probes in search order.
+
+`AirHandlerBench/` is a serial-only sketch for proving a shield's wiring before the node goes on WiFi: ROMs with CRC, both probe temperatures, A0 and A1 in counts, ohms and °F, and D8 with an edge count. Type `r` in the Serial Monitor to rescan the bus.
+
+Both build with `arduino-cli compile -b arduino:renesas_uno:unor4wifi <folder>` once the OneWire, DallasTemperature and ArduinoGraphics libraries are installed. On an Apple Silicon Mac the R4 core's compiler is Intel-only, so it needs Rosetta.
+
 ## Known Issues / Notes
 
 **WiFi credentials are in `arduino_secrets.h` (gitignored).** Each sketch folder contains an `arduino_secrets.h` that defines `SECRET_SSID` and `SECRET_PASS`. This file is listed in `.gitignore` and is not committed. If you clone the repo fresh, copy `arduino_secrets.h.example` from the repo root to each sketch folder and fill in your credentials. Note that credentials were previously committed inline in the `.ino` files — the git history retains that, but they are no longer committed going forward.
