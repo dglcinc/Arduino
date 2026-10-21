@@ -10,8 +10,8 @@
 //
 // Shield nets (pivac docs/mbr-air-handler-node-shield-review.md):
 //   D2  1-Wire DQ, R7 4.7k pull-up to 5V, terminals 1 VDD, 2 DQ, 3 GND
-//   A0  return-air NTC, R8 10.0k to 5V, NTC to GND, C6 0.1uF, terminals 6 A0, 7 GND
-//   A1  supply-air NTC, R9 10.0k to 5V, NTC to GND, C7 0.1uF, terminals 11 A1, 10 GND
+//   A0  supply-air NTC, R8 10.0k to 5V, NTC to GND, C6 0.1uF, terminals 6 A0, 7 GND
+//   A1  return-air NTC, R9 10.0k to 5V, NTC to GND, C7 0.1uF, terminals 11 A1, 10 GND
 //   D8  Y2 relay contact to GND, R10 1k pull-up to 5V, terminals 5 D8, 4 GND
 //
 // Requires the OneWire and DallasTemperature libraries (the same pair ArduinoPSI_Domestic uses).
