@@ -10,8 +10,8 @@
 //
 // Shield nets (pivac docs/mbr-air-handler-node-shield-review.md):
 //   D2  1-Wire DQ, R7 4.7k pull-up to 5V, terminals 1 VDD, 2 DQ, 3 GND
-//   A0  return-air NTC, R8 10.0k to 5V, NTC to GND, C6 0.1uF, terminals 6 A0, 7 GND
-//   A1  supply-air NTC, R9 10.0k to 5V, NTC to GND, C7 0.1uF, terminals 11 A1, 10 GND
+//   A0  supply-air NTC, R8 10.0k to 5V, NTC to GND, C6 0.1uF, terminals 6 A0, 7 GND
+//   A1  return-air NTC, R9 10.0k to 5V, NTC to GND, C7 0.1uF, terminals 11 A1, 10 GND
 //   D8  Y2 relay contact to GND, R10 1k pull-up to 5V, terminals 5 D8, 4 GND
 //
 // Requires the OneWire and DallasTemperature libraries (the same pair ArduinoPSI_Domestic uses).
@@ -22,7 +22,7 @@
 #define ONE_WIRE_PIN   2
 #define Y2_PIN         8
 #define NTC_R0_OHM     10000.0f   // NTC resistance at 25 C
-#define NTC_BETA       3950.0f
+#define NTC_BETA       3995.0f   // fitted 2026-10-20, same as AirHandler_MBR
 #define NTC_RREF_OHM   10000.0f   // R8 and R9
 #define ADC_MAX        16383.0f   // analogReadResolution(14)
 #define ADC_SAMPLES    256

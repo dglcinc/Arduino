@@ -19,6 +19,7 @@ All boards are **Arduino UNO R4 WiFi**. The pressure sensor connects to analog p
 | ArduinoPSI_BoilerLoop | Fusch 100PSI  | 10.0.0.219  | 34:b7:da:66:1e:50  | 100     | 0.5–4.5V             |
 | ArduinoPSI_Domestic   | Fusch 200PSI  | 10.0.0.114  | c0:4e:30:11:6f:3c  | 200     | 0.5–5.0V             |
 | DomesticWater         | DAE MJ-75a meter | 10.0.0.188 | 34:b7:da:65:99:1c | —       | reed on D2 (not A0)  |
+| AirHandler_MBR        | 2× DS18B20 on D2, 2× 10K NTC on A0/A1, Y2 relay on D8 | 10.0.0.180 | e8:f6:0a:aa:a3:88 | — | PROTO-SHIELD; 24 VAC buck converter (4.65 V at the shield) |
 
 All boards have static IP addresses assigned via DHCP reservation on the router.
 
@@ -51,7 +52,7 @@ When making logic changes, edit `ArduinoPSI_BoilerLoop/ArduinoPSI_impl.h` direct
 
 ### Air-handler nodes
 
-`AirHandler/AirHandler_impl.h` holds all logic for the air-handler nodes. Each zone has its own folder, starting with `AirHandler_MBR/`, holding a symlink to that header and a `.ino` that defines only `ZONE_TAG`, `HOSTNAME`, the two DS18B20 ROMs and the NTC constants. The design is in pivac's `docs/mbr-air-handler-node-plan.md` §4, and the shield wiring in `docs/mbr-air-handler-node-shield-review.md`. The node reads water supply and return on D2, return air on A0, supply air on A1 and the Y2 contact on D8. It serves `{'wsup' : …, 'wret' : …, 'aret' : …, 'asup' : …, 'y2' : …, 'y2_s' : …, 'rssi' : …, 'uptime_ms' : …}` and leaves out any sensor that failed to read. It prints the bus ROMs and raw counts for ten seconds at boot, before WiFi. While the zone file's ROMs are all zero, it reads the first two probes in search order.
+`AirHandler/AirHandler_impl.h` holds all logic for the air-handler nodes. Each zone has its own folder, starting with `AirHandler_MBR/`, holding a symlink to that header and a `.ino` that defines only `ZONE_TAG`, `HOSTNAME`, the two DS18B20 ROMs and the NTC constants. The design is in pivac's `docs/mbr-air-handler-node-plan.md` §4, and the shield wiring in `docs/mbr-air-handler-node-shield-review.md`. The node reads water supply and return on D2, supply air on A0, return air on A1 and the Y2 contact on D8. It serves `{'wsup' : …, 'wret' : …, 'aret' : …, 'asup' : …, 'y2' : …, 'y2_s' : …, 'rssi' : …, 'uptime_ms' : …}` and leaves out any sensor that failed to read. It prints the bus ROMs and raw counts for ten seconds at boot, before WiFi. While the zone file's ROMs are all zero, it reads the first two probes in search order.
 
 `AirHandlerBench/` is a serial-only sketch for proving a shield's wiring before the node goes on WiFi: ROMs with CRC, both probe temperatures, A0 and A1 in counts, ohms and °F, and D8 with an edge count. Type `r` in the Serial Monitor to rescan the bus.
 

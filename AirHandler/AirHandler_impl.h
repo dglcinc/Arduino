@@ -12,7 +12,7 @@
 //                   which is enough for the bench, and the boot log prints both ROMs to copy in.
 //   NTC_R0_OHM, NTC_BETA, NTC_RREF_OHM
 //
-// Pins (fixed by the shield): D2 1-Wire, A0 return-air NTC, A1 supply-air NTC, D8 Y2 contact to GND.
+// Pins (fixed by the shield): D2 1-Wire, A0 supply-air NTC, A1 return-air NTC, D8 Y2 contact to GND.
 //
 // Response, one line, single-quoted for pivac.ArduinoSensor's ast.literal_eval; a sensor that did not
 // read correctly is left out of the line, never sent as a sentinel:
@@ -30,8 +30,8 @@
 
 const int ONE_WIRE_PIN = 2;
 const int Y2_PIN       = 8;
-const int ARET_PIN     = A0;
-const int ASUP_PIN     = A1;
+const int ASUP_PIN     = A0;
+const int ARET_PIN     = A1;
 
 const float ADC_MAX = 16383.0f;            // analogReadResolution(14)
 
@@ -100,7 +100,10 @@ float ntcF(float counts) {
 
 float dsRead(const DeviceAddress rom, int index) {
   float f = romsByIndex ? ds.getTempFByIndex(index) : ds.getTempF(rom);
-  if (f == DEVICE_DISCONNECTED_F || f == 185.0f) return NAN;
+  // DEVICE_DISCONNECTED_F is a double expression (-196.6) and never compares equal to the float the
+  // library returns, so test by range: nothing real reads below -100 F. 185.0 F is the 85 C power-on
+  // value of a probe that has not converted yet.
+  if (f < -100.0f || fabsf(f - 185.0f) < 0.01f) return NAN;
   return f;
 }
 
@@ -135,9 +138,9 @@ void bringUp() {
     Serial.print("F  ds1 ");
     Serial.print(ds.getTempFByIndex(1), 2);
     Serial.print("F  A0 ");
-    Serial.print(analogRead(ARET_PIN));
-    Serial.print("  A1 ");
     Serial.print(analogRead(ASUP_PIN));
+    Serial.print("  A1 ");
+    Serial.print(analogRead(ARET_PIN));
     Serial.print("  D8 ");
     Serial.println(digitalRead(Y2_PIN) == LOW ? "LOW" : "HIGH");
   }
@@ -147,8 +150,11 @@ bool connectWiFi(unsigned long budgetMs) {
   unsigned long start = millis();
   Serial.print("Connecting to SSID: ");
   Serial.println(ssid);
+  WDT.refresh();
   WiFi.disconnect();
-  WiFi.setHostname(HOSTNAME);
+  // No WiFi.setHostname(): on the R4 WiFi it blocks for more than the 5 s watchdog and the board
+  // reboots in a loop (bench, 2026-10-18). Name the client on the UCG instead.
+  WDT.refresh();
   WiFi.begin(ssid, pass);
   while (WiFi.status() != WL_CONNECTED) {
     if (millis() - start > budgetMs) return false;
@@ -328,13 +334,13 @@ void loop() {
     aret = ntcF(cRet);
     asup = ntcF(cSup);
     Serial.print("A0 ");
-    Serial.print(cRet, 0);
-    Serial.print(" cts ");
-    Serial.print(aret, 2);
-    Serial.print("F  A1 ");
     Serial.print(cSup, 0);
     Serial.print(" cts ");
     Serial.print(asup, 2);
+    Serial.print("F  A1 ");
+    Serial.print(cRet, 0);
+    Serial.print(" cts ");
+    Serial.print(aret, 2);
     Serial.print("F  (");
     Serial.print(adcCount);
     Serial.print(" samples)  y2 ");

@@ -7,14 +7,18 @@
 #define ZONE_TAG       "MBR"
 #define HOSTNAME       "airhandler-mbr"
 
-// DS18B20 ROMs for the coil's water supply and return, from the boot log (bring-up, plan §4.8).
-// While both are zero the node reads the first two probes on the bus in search order.
-#define ROM_WSUP       { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
-#define ROM_WRET       { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
+// DS18B20 ROMs for the coil's water supply and return: PA5A on the supply pipe and PA5B on the
+// return (David, 2026-10-20; pivac docs/mbr-air-handler-node-plan.md §3.1). Both are w1 names
+// 28-000000cb6e28 and 28-0000001a8cda on a Pi; the bytes below are the bus order.
+// With both zero the node would read the first two probes on the bus in search order.
+#define ROM_WSUP       { 0x28, 0x28, 0x6E, 0xCB, 0x00, 0x00, 0x00, 0x17 }   // PA5A
+#define ROM_WRET       { 0x28, 0xDA, 0x8C, 0x1A, 0x00, 0x00, 0x00, 0xDC }   // PA5B
 
-// NTC curve: nominal resistance at 25 C and beta from the data sheet, checked in plan §6.
+// NTC curve: nominal resistance at 25 C, and beta fitted to the three bath points of 2026-10-20
+// (32.2, 90.0 and 129.65 F; per-sensor fits 4006 and 3982 K). Per-sensor residuals are offsets in
+// pivac config, never here. The data-sheet 3950 read the supply sensor 1.5 F high at 130 F.
 #define NTC_R0_OHM     10000.0f
-#define NTC_BETA       3950.0f
+#define NTC_BETA       3995.0f
 #define NTC_RREF_OHM   10000.0f    // R8 and R9
 
 #include "AirHandler_impl.h"
