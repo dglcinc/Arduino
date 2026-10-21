@@ -22,7 +22,7 @@
 #define ONE_WIRE_PIN   2
 #define Y2_PIN         8
 #define NTC_R0_OHM     10000.0f   // NTC resistance at 25 C
-#define NTC_BETA       3950.0f
+#define NTC_BETA       3995.0f   // fitted 2026-10-20, same as AirHandler_MBR
 #define NTC_RREF_OHM   10000.0f   // R8 and R9
 #define ADC_MAX        16383.0f   // analogReadResolution(14)
 #define ADC_SAMPLES    256
