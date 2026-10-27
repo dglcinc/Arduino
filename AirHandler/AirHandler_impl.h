@@ -11,8 +11,12 @@
 //                   known": the node then reads the first two probes on the bus in search order,
 //                   which is enough for the bench, and the boot log prints both ROMs to copy in.
 //   NTC_R0_OHM, NTC_BETA, NTC_RREF_OHM
+//   SHIELD_PCB      define it for the fabricated shield (pivac docs/air-handler-shield-pcb-plan.md),
+//                   which has return air on A0 and supply air on A1; leave it out for the proto-shield
 //
-// Pins (fixed by the shield): D2 1-Wire, A0 supply-air NTC, A1 return-air NTC, D8 Y2 contact to GND.
+// Pins: A0 and A1 the air NTCs (order set by SHIELD_PCB), D8 the Y2 call, low while calling. The 1-Wire bus
+// is on a DS2482 at I2C 0x18 when one answers (the fabricated shield's U2), otherwise on D2 (the
+// proto-shield, or the fabricated shield with U2 off and JP1 bridged); OneWireBus.h chooses at boot.
 //
 // Response, one line, single-quoted for pivac.ArduinoSensor's ast.literal_eval; a sensor that did not
 // read correctly is left out of the line, never sent as a sentinel:
@@ -24,14 +28,18 @@
 #include "Arduino_LED_Matrix.h"
 #include "WiFiS3.h"
 #include "WDT.h"
-#include <OneWire.h>
-#include <DallasTemperature.h>
+#include "OneWireBus.h"         // symlink, like this file
 #include "arduino_secrets.h"     // SECRET_SSID, SECRET_PASS (gitignored)
 
 const int ONE_WIRE_PIN = 2;
 const int Y2_PIN       = 8;
+#ifdef SHIELD_PCB                          // the fabricated shield: TB2 RET to A0, SUP to A1
+const int ARET_PIN     = A0;
+const int ASUP_PIN     = A1;
+#else                                      // the proto-shield
 const int ASUP_PIN     = A0;
 const int ARET_PIN     = A1;
+#endif
 
 const float ADC_MAX = 16383.0f;            // analogReadResolution(14)
 
@@ -49,8 +57,12 @@ char pass[] = SECRET_PASS;
 
 WiFiServer        server(80);
 ArduinoLEDMatrix  matrix;
-OneWire           oneWire(ONE_WIRE_PIN);
-DallasTemperature ds(&oneWire);
+OneWireBus        bus(ONE_WIRE_PIN);
+
+typedef uint8_t DeviceAddress[8];
+const int       MAX_PROBES = 8;
+DeviceAddress   found[MAX_PROBES];             // the bus in search order, from the last scan
+int             nFound = 0;
 
 DeviceAddress romWsup = ROM_WSUP;
 DeviceAddress romWret = ROM_WRET;
@@ -98,13 +110,29 @@ float ntcF(float counts) {
   return (k - 273.15f) * 9.0f / 5.0f + 32.0f;
 }
 
+// NAN for a missing probe, a bad CRC or the 85 C power-on value (OneWireBus::readF).
 float dsRead(const DeviceAddress rom, int index) {
-  float f = romsByIndex ? ds.getTempFByIndex(index) : ds.getTempF(rom);
-  // DEVICE_DISCONNECTED_F is a double expression (-196.6) and never compares equal to the float the
-  // library returns, so test by range: nothing real reads below -100 F. 185.0 F is the 85 C power-on
-  // value of a probe that has not converted yet.
-  if (f < -100.0f || fabsf(f - 185.0f) < 0.01f) return NAN;
-  return f;
+  if (!romsByIndex) return bus.readF(rom);
+  return index < nFound ? bus.readF(found[index]) : NAN;
+}
+
+// Search the bus into found[], set every probe to 12 bits, and print the ROMs when asked.
+void scanBus(bool print) {
+  DeviceAddress a;
+  nFound = 0;
+  bus.reset_search();
+  while (nFound < MAX_PROBES && bus.search(a)) {
+    bool crcOk = OneWire::crc8(a, 7) == a[7];
+    if (print) {
+      Serial.print("ROM ");
+      Serial.print(nFound);
+      Serial.print("  ");
+      printRom(a);
+      Serial.println(crcOk ? "  CRC ok" : "  CRC BAD");
+    }
+    if (crcOk) memcpy(found[nFound++], a, 8);
+  }
+  for (int i = 0; i < nFound; i++) bus.setResolution12(found[i]);
 }
 
 // Before WiFi: list every ROM on the bus and the raw ADC counts for BRINGUP_MS, so the ROMs can be
@@ -114,29 +142,22 @@ void bringUp() {
   Serial.print("AirHandler ");
   Serial.print(ZONE_TAG);
   Serial.println(" bring-up: 1-Wire ROMs, then raw counts and temperatures");
-  DeviceAddress a;
-  int n = 0;
-  oneWire.reset_search();
-  while (oneWire.search(a)) {
-    Serial.print("ROM ");
-    Serial.print(n++);
-    Serial.print("  ");
-    printRom(a);
-    Serial.println(OneWire::crc8(a, 7) == a[7] ? "  CRC ok" : "  CRC BAD");
-  }
-  if (n == 0) Serial.println("No 1-Wire devices on D2.");
+  Serial.print("1-Wire master: ");
+  Serial.println(bus.masterName());
+  scanBus(true);
+  if (nFound == 0) Serial.println("No 1-Wire devices on the bus.");
   if (romsByIndex) Serial.println("Zone file ROMs are zero: wsup = probe 0, wret = probe 1 in search order.");
 
   unsigned long start = millis();
   while (millis() - start < BRINGUP_MS) {
     WDT.refresh();
-    ds.requestTemperatures();
+    bus.convertAll();
     delay(800);                                  // conversion, bring-up only
     WDT.refresh();
     Serial.print("ds0 ");
-    Serial.print(ds.getTempFByIndex(0), 2);
+    Serial.print(nFound > 0 ? bus.readF(found[0]) : NAN, 2);
     Serial.print("F  ds1 ");
-    Serial.print(ds.getTempFByIndex(1), 2);
+    Serial.print(nFound > 1 ? bus.readF(found[1]) : NAN, 2);
     Serial.print("F  A0 ");
     Serial.print(analogRead(ASUP_PIN));
     Serial.print("  A1 ");
@@ -283,14 +304,12 @@ void setup() {
 
   pinMode(Y2_PIN, INPUT);                         // R10 is the pull-up
   analogReadResolution(14);
-  ds.begin();
+  bus.begin();
   romsByIndex = romIsZero(romWsup) || romIsZero(romWret);
-  ds.setResolution(12);
-  ds.setWaitForConversion(false);
 
   bringUp();
 
-  ds.requestTemperatures();
+  bus.convertAll();
   lastDs = millis();
 
   if (WiFi.status() == WL_NO_MODULE) {
@@ -354,7 +373,7 @@ void loop() {
   if (now - lastDs >= DS_PERIOD_MS) {
     wsup = dsRead(romWsup, 0);
     wret = dsRead(romWret, 1);
-    ds.requestTemperatures();                     // 750 ms at 12 bits, done before the next read
+    bus.convertAll();                             // 750 ms at 12 bits, done before the next read
     lastDs = now;
     Serial.print("wsup ");
     Serial.print(wsup, 2);
