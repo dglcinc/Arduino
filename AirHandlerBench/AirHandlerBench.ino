@@ -3,7 +3,9 @@
 // No WiFi and no HTTP: this sketch only proves the shield's wiring before the node's real sketch
 // (pivac docs/mbr-air-handler-node-plan.md §4) is written. Open the Serial Monitor at 115200.
 //
-// At boot it searches the 1-Wire bus on D2 and lists every ROM with its CRC check, in the order
+// At boot it finds the 1-Wire master, a DS2482 at I2C 0x18 if one answers (the fabricated shield's U2)
+// and D2 otherwise (the proto-shield, or the fabricated shield with U2 off and JP1 bridged), then
+// searches the bus and lists every ROM with its CRC check, in the order
 // the zone file wants them (28-byte form). Then once a second it prints one line:
 //
 //   ds[0] 71.83F  ds[1] 72.01F | A0 8143 cts 9940 ohm 77.3F | A1 8190 cts 9998 ohm 77.0F | D8 HIGH y2=0 edges=0
@@ -14,10 +16,14 @@
 //   A1  return-air NTC, R9 10.0k to 5V, NTC to GND, C7 0.1uF, terminals 11 A1, 10 GND
 //   D8  Y2 relay contact to GND, R10 1k pull-up to 5V, terminals 5 D8, 4 GND
 //
-// Requires the OneWire and DallasTemperature libraries (the same pair ArduinoPSI_Domestic uses).
+// Fabricated shield, rev A (pivac docs/air-handler-shield-assembly.md):
+//   I2C DS2482 U2 at 0x18 on A4/A5, bus on TB3 V · D · G; or D2 with U2 off, JP1 bridged, R15 fitted
+//   A0  return-air NTC (TB2 RET), R1 10.0k to 5V;  A1 supply-air NTC (TB2 SUP), R2 10.0k to 5V
+//   D8  Y2 optocoupler U3, low on a call;  D9 W2 optocoupler U4, not read here
+//
+// Requires the OneWire library. OneWireBus.h is a symlink to ../AirHandler/OneWireBus.h.
 
-#include <OneWire.h>
-#include <DallasTemperature.h>
+#include "OneWireBus.h"
 
 #define ONE_WIRE_PIN   2
 #define Y2_PIN         8
@@ -27,9 +33,9 @@
 #define ADC_MAX        16383.0f   // analogReadResolution(14)
 #define ADC_SAMPLES    256
 
-OneWire           oneWire(ONE_WIRE_PIN);
-DallasTemperature ds(&oneWire);
+OneWireBus        bus(ONE_WIRE_PIN);
 
+typedef uint8_t DeviceAddress[8];
 DeviceAddress roms[8];
 int           nRoms = 0;
 
@@ -50,8 +56,8 @@ void printRom(const DeviceAddress a) {
 void scanBus() {
   nRoms = 0;
   DeviceAddress a;
-  oneWire.reset_search();
-  while (nRoms < 8 && oneWire.search(a)) {
+  bus.reset_search();
+  while (nRoms < 8 && bus.search(a)) {
     bool crcOk = OneWire::crc8(a, 7) == a[7];
     Serial.print("ROM ");
     Serial.print(nRoms);
@@ -61,7 +67,8 @@ void scanBus() {
     Serial.println(a[0] == 0x28 ? "  DS18B20" : "  not a DS18B20");
     if (crcOk) memcpy(roms[nRoms++], a, 8);
   }
-  if (nRoms == 0) Serial.println("No 1-Wire devices on D2.");
+  if (nRoms == 0) Serial.println("No 1-Wire devices on the bus.");
+  for (int i = 0; i < nRoms; i++) bus.setResolution12(roms[i]);
 }
 
 // NTC on the low side of the divider: 5V - Rref - pin - NTC - GND.
@@ -105,13 +112,13 @@ void setup() {
   while (!Serial && millis() - t0 < 3000) {}
   pinMode(Y2_PIN, INPUT);               // R10 is the pull-up
   analogReadResolution(14);
-  ds.begin();
+  bus.begin();
   Serial.println();
-  Serial.println("AirHandlerBench: 1-Wire on D2, NTCs on A0 and A1, Y2 on D8");
+  Serial.println("AirHandlerBench: 1-Wire, NTCs on A0 and A1, Y2 on D8");
+  Serial.print("1-Wire master: ");
+  Serial.println(bus.masterName());
   scanBus();
-  for (int i = 0; i < nRoms; i++) ds.setResolution(roms[i], 12);
-  ds.setWaitForConversion(false);
-  ds.requestTemperatures();
+  bus.convertAll();
   y2Last = digitalRead(Y2_PIN);
 }
 
@@ -129,17 +136,16 @@ void loop() {
   lastPrint = millis();
 
   for (int i = 0; i < nRoms; i++) {
-    float f = ds.getTempF(roms[i]);
+    float f = bus.readF(roms[i]);
     Serial.print("ds[");
     Serial.print(i);
     Serial.print("] ");
-    if (f == DEVICE_DISCONNECTED_F) Serial.print("DISCONNECTED");
-    else if (f == 185.0f) Serial.print("185.0F (power-on value)");
+    if (isnan(f)) Serial.print("NO READ");
     else { Serial.print(f, 2); Serial.print("F"); }
     Serial.print("  ");
   }
   if (nRoms) Serial.print("| ");
-  ds.requestTemperatures();             // 750 ms at 12 bits, ready by the next line
+  bus.convertAll();                     // 750 ms at 12 bits, ready by the next line
 
   printAnalog("A0", A0);
   Serial.print(" | ");
@@ -153,8 +159,7 @@ void loop() {
   if (Serial.available()) {
     if (Serial.read() == 'r') {
       scanBus();
-      for (int i = 0; i < nRoms; i++) ds.setResolution(roms[i], 12);
-      ds.requestTemperatures();
+      bus.convertAll();
     }
   }
 }
