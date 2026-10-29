@@ -157,7 +157,10 @@ void loop() {
 
   // Type r in the Serial Monitor to rescan the bus after plugging in a probe.
   if (Serial.available()) {
-    if (Serial.read() == 'r') {
+    if (Serial.read() == 'r') {        // re-detect the master too: the boot banner is gone by the
+      bus.begin();                      // time a monitor opens on the R4
+      Serial.print("1-Wire master: ");
+      Serial.println(bus.masterName());
       scanBus();
       bus.convertAll();
     }
