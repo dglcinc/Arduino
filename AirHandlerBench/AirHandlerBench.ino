@@ -21,6 +21,9 @@
 //   A0  return-air NTC (TB2 RET), R1 10.0k to 5V;  A1 supply-air NTC (TB2 SUP), R2 10.0k to 5V
 //   D8  Y2 optocoupler U3, low on a call;  D9 W2 optocoupler U4, not read here
 //
+// Keys in the monitor: r re-detects the master and rescans; s prints the DS2482 status after a bus reset
+// (presence, short, line level), which tells an open bus from a shorted one.
+//
 // Requires the OneWire library. OneWireBus.h is a symlink to ../AirHandler/OneWireBus.h.
 
 #include "OneWireBus.h"
@@ -157,12 +160,22 @@ void loop() {
 
   // Type r in the Serial Monitor to rescan the bus after plugging in a probe.
   if (Serial.available()) {
-    if (Serial.read() == 'r') {        // re-detect the master too: the boot banner is gone by the
+    int c = Serial.read();
+    if (c == 'r') {                     // re-detect the master too: the boot banner is gone by the
       bus.begin();                      // time a monitor opens on the R4
       Serial.print("1-Wire master: ");
       Serial.println(bus.masterName());
       scanBus();
       bus.convertAll();
+    } else if (c == 's') {              // the DS2482's own view of the line, to split open from short
+      uint8_t st = bus.resetStatus();
+      if (st == 0xFF) Serial.println("bus status: no DS2482 answering");
+      else {
+        Serial.print("bus status 0x"); Serial.print(st, HEX);
+        Serial.print(": presence="); Serial.print(OneWireBus::stPresence(st));
+        Serial.print(" short=");     Serial.print(OneWireBus::stShort(st));
+        Serial.print(" line=");      Serial.println(OneWireBus::stLineHigh(st) ? "high" : "LOW");
+      }
     }
   }
 }

@@ -56,6 +56,18 @@ public:
     return (s & ST_PPD) && !(s & ST_SD) ? 1 : 0;
   }
 
+  // The DS2482 status byte after a 1-Wire reset, for the bench: bit 1 presence, bit 2 short,
+  // bit 3 line level. 0xFF when there is no DS2482 or it stopped answering.
+  uint8_t resetStatus() {
+    if (!i2c) return 0xFF;
+    uint8_t s;
+    if (!cmd(0xB4) || !waitIdle(s)) return 0xFF;
+    return s;
+  }
+  static bool stPresence(uint8_t s) { return s & ST_PPD; }
+  static bool stShort(uint8_t s)    { return s & ST_SD; }
+  static bool stLineHigh(uint8_t s) { return s & ST_LL; }
+
   void write(uint8_t v) {
     if (!i2c) { ow.write(v); return; }
     uint8_t s;
@@ -155,7 +167,7 @@ public:
   }
 
 private:
-  static const uint8_t ST_1WB = 0x01, ST_PPD = 0x02, ST_SD = 0x04, ST_RST = 0x10,
+  static const uint8_t ST_1WB = 0x01, ST_PPD = 0x02, ST_SD = 0x04, ST_LL = 0x08, ST_RST = 0x10,
                        ST_SBR = 0x20, ST_TSB = 0x40, ST_DIR = 0x80;
 
   OneWire ow;
