@@ -23,6 +23,12 @@
 //
 // Framing and decoding are ports of pivac/unico_scb_protocol.py (split_frames, decode_status).
 //
+// Bench result, 2026-10-31, utility zone M2430 (Unico USB board VID 04B4 PID 0003, CDC): with the
+// board attached at boot it mounts and the first status frame arrives at t=0.5 s, and the decoded
+// values match the Mac run. Attaching or removing it while the sketch runs is never seen, and the
+// stream stopped twice after console keystrokes with the host still reporting connected. A node
+// must reboot itself when status frames stop. One gap in about every 14 s runs ~2050 ms.
+//
 // Build: arduino-pico core (earlephilhower), board "Adafruit Feather RP2040 USB Host",
 // USB Stack "Adafruit TinyUSB", CPU Speed 120 MHz (PIO USB needs a multiple of 12 MHz):
 //   arduino-cli compile -b rp2040:rp2040:adafruit_feather_usb_host:usbstack=tinyusb,freq=120 UnicoSCBBench
@@ -70,6 +76,12 @@ bool     haveStored = false;
 
 volatile bool mountEvent = false, umountEvent = false;
 volatile uint16_t usbVid = 0, usbPid = 0;
+
+// Any device that finishes enumeration, whether or not the CDC driver binds to it.
+volatile bool devEvent = false, devGoneEvent = false, descEvent = false, descFailed = false;
+volatile uint16_t devVid = 0, devPid = 0;
+volatile uint8_t devAddr = 0;
+uint8_t descBuf[256];
 
 // --- framing ------------------------------------------------------------------------------------
 
@@ -222,7 +234,7 @@ void setup() {
   Serial.begin(115200);
   pinMode(LED_BUILTIN, OUTPUT);
   unsigned long t0 = millis();
-  while (!Serial && millis() - t0 < 3000) delay(10);
+  while (!Serial && millis() - t0 < 15000) delay(10);
   Serial.println("UnicoSCBBench: listen only, 4800 8N1 on the USB-A host port. r = hex dump, s = stats");
 }
 
@@ -235,6 +247,25 @@ void loop() {
   if (umountEvent) {
     umountEvent = false;
     Serial.println("USB device removed");
+  }
+  if (devEvent) {
+    devEvent = false;
+    Serial.printf("enumerated: addr %u VID %04X PID %04X\n", devAddr, devVid, devPid);
+  }
+  if (devGoneEvent) {
+    devGoneEvent = false;
+    Serial.println("device gone");
+  }
+  if (descFailed) {
+    descFailed = false;
+    Serial.println("config descriptor read failed");
+  }
+  if (descEvent) {
+    descEvent = false;
+    uint16_t total = descBuf[2] | (descBuf[3] << 8);
+    Serial.printf("config descriptor, %u bytes:", total);
+    for (uint16_t i = 0; i < total && i < sizeof(descBuf); i++) Serial.printf(" %02X", descBuf[i]);
+    Serial.println();
   }
 
   while (Serial.available()) {
@@ -307,6 +338,26 @@ void tuh_cdc_mount_cb(uint8_t idx) {
   usbVid = vid;
   usbPid = pid;
   mountEvent = true;
+}
+
+void descDone(tuh_xfer_t *xfer) {
+  if (xfer->result == XFER_RESULT_SUCCESS) descEvent = true;
+  else descFailed = true;
+}
+
+void tuh_mount_cb(uint8_t addr) {
+  uint16_t vid = 0, pid = 0;
+  tuh_vid_pid_get(addr, &vid, &pid);
+  devVid = vid;
+  devPid = pid;
+  devAddr = addr;
+  devEvent = true;
+  tuh_descriptor_get_configuration(addr, 0, descBuf, sizeof(descBuf), descDone, 0);
+}
+
+void tuh_umount_cb(uint8_t addr) {
+  (void)addr;
+  devGoneEvent = true;
 }
 
 void tuh_cdc_umount_cb(uint8_t idx) {
