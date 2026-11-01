@@ -33,7 +33,7 @@
 #include "OneWireBus.h"
 #include "CalTracker.h"
 
-#define NTC_PAIRS      4
+#define NTC_PAIRS      2          // plugs in rotation; change it to match the pairs in the bath
 #define ONE_WIRE_PIN   2
 #define NTC_R0_OHM     10000.0f   // NTC resistance at 25 C
 #define NTC_BETA       3995.0f    // fitted 2026-10-20, same as AirHandler_MBR
