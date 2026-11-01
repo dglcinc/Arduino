@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AirMaster</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--ink:#17202a;--dim:#5d6b78;--line:#d8dee4;--bg:#f3f5f7;--card:#fff;--acc:#135ea8;--ok:#14803c;--bad:#b42318;--warn:#fff4d6;--warnink:#6b4e00}
+@media(prefers-color-scheme:dark){:root{--ink:#e8edf2;--dim:#9aa7b4;--line:#33404c;--bg:#12181e;--card:#1b232b;--acc:#6db0f2;--ok:#4cc27a;--bad:#ff8a7a;--warn:#3a2f10;--warnink:#f0d48a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+header{background:var(--card);border-bottom:1px solid var(--line);padding:12px 16px}
+h1{font-size:19px;margin:0}header small{color:var(--dim)}
+nav{display:flex;gap:4px;margin-top:10px}
+nav button{flex:1;background:none;border:0;border-bottom:3px solid transparent;color:var(--dim);padding:8px 4px;font:inherit;border-radius:0;min-height:44px}
+nav button.on{color:var(--acc);border-color:var(--acc);font-weight:600}
+main{max-width:640px;margin:0 auto;padding:12px}
+section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:12px}
+h2{font-size:15px;margin:0 0 10px}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.v{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums}.l{color:var(--dim);font-size:13px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--line);border-radius:14px;padding:3px 11px;font-size:13px;color:var(--dim)}
+.chip.on{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+@media(prefers-color-scheme:dark){.chip.on{color:#10202e}}
+label{display:block;margin:0 0 12px;font-size:14px;color:var(--dim)}
+input,select{display:block;width:100%;margin-top:4px;padding:10px;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:7px;min-height:44px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+button{font:inherit;padding:10px 16px;border-radius:7px;border:1px solid var(--acc);background:var(--acc);color:#fff;min-height:44px}
+@media(prefers-color-scheme:dark){button{color:#10202e}}
+button.q{background:none;color:var(--acc)}button.d{background:none;color:var(--bad);border-color:var(--bad)}
+button:disabled{opacity:.5}
+.bar{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.msg{padding:10px 12px;border-radius:7px;margin-bottom:12px;background:var(--warn);color:var(--warnink);font-size:14px}
+.msg.bad{outline:1px solid var(--bad)}.msg.ok{background:none;outline:1px solid var(--ok);color:var(--ok)}
+.note{color:var(--dim);font-size:13px}
+.addr{font-size:18px;font-weight:600;word-break:break-all}
+table{width:100%;border-collapse:collapse;font-size:14px}td,th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left}
+td input{margin:0;min-height:38px;padding:6px 8px}
+code{font-size:13px;word-break:break-all}
+[hidden]{display:none!important}
+</style></head><body>
+<header><h1 id="title">AirMaster</h1><small id="sub"></small>
+<nav id="nav" hidden><button data-t="status" class="on">Status</button><button data-t="settings">Settings</button><button data-t="unit">Unit</button></nav></header>
+<main id="main"></main>
+<script>
+"use strict";
+const $=(t,a={},...kids)=>{const e=document.createElement(t);for(const k in a){if(k==="on")for(const ev in a.on)e.addEventListener(ev,a.on[ev]);else if(k==="class")e.className=a[k];else if(k in e&&k!=="list")e[k]=a[k];else e.setAttribute(k,a[k])}for(const c of kids)e.append(c);return e};
+const main=document.getElementById("main");
+const MODES=[["G","Fan only"],["Y1","Cooling, low"],["Y2","Cooling, high"],["W1","Heating, low"],["W2","Heating, high"],["E","Emergency heat"]];
+let info=null,tab="status",timer=null,draft=null;
+
+async function get(u){const r=await fetch(u,{cache:"no-store"});return r.json()}
+async function post(u,params,raw){
+  const o={method:"POST",headers:{"X-AirMaster":"1"}};
+  if(raw)o.body=raw;else{o.headers["Content-Type"]="application/x-www-form-urlencoded";o.body=new URLSearchParams(params||{}).toString()}
+  const r=await fetch(u,o);let j={};try{j=await r.json()}catch(e){}
+  if(!r.ok)throw new Error(j.error||("The unit answered "+r.status));
+  return j;
+}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function msg(text,kind){return $("div",{class:"msg "+(kind||""),textContent:text})}
+function clearTimer(){if(timer){clearTimeout(timer);timer=null}}
+function field(label,input){return $("label",{},label,input)}
+
+// ---------- first setup and recovery ----------
+function renderSetup(){
+  document.getElementById("nav").hidden=true;
+  main.replaceChildren();
+  const fresh=info.mode==="setup";
+  if(info.error)main.append(msg(info.error,"bad"));
+  if(info.mode==="fallback")main.append(msg("This AirMaster cannot reach its saved WiFi. It will try again by itself after 10 minutes with nobody connected here. Change the network below if it has changed."));
+  if(info.mode==="recovery")main.append(msg("Recovery. Set a new admin password or WiFi below. Leave a field blank to keep what is saved."));
+  const nets=$("select",{},$("option",{value:"",textContent:"Choose a network"}));
+  for(const n of info.networks.slice().sort((a,b)=>b.rssi-a.rssi))nets.append($("option",{value:n.ssid,textContent:n.ssid+" ("+bars(n.rssi)+(n.open?", open":"")+")"}));
+  nets.append($("option",{value:"\u0000other",textContent:"Other, type the name"}));
+  const other=$("input",{placeholder:"Network name",autocapitalize:"off",autocorrect:"off",hidden:true});
+  nets.addEventListener("change",()=>{other.hidden=nets.value!=="\u0000other"});
+  const pass=$("input",{type:"password",autocomplete:"off",autocapitalize:"off"});
+  const name=$("input",{value:info.name||"",placeholder:"Master Bedroom",maxLength:32});
+  const a1=$("input",{type:"password",autocomplete:"new-password"}),a2=$("input",{type:"password",autocomplete:"new-password"});
+  const err=$("div");
+  const go=$("button",{textContent:"Save and connect"});
+  const form=$("section",{},$("h2",{textContent:fresh?"Connect this AirMaster to your WiFi":"WiFi"}),
+    field("WiFi network",nets),other,field("WiFi password",pass),
+    $("h2",{textContent:"This unit"}),field("Name, such as the zone it serves",name),
+    field(fresh?"Admin password, 8 characters or more, needed to change settings":"New admin password",a1),field("Admin password again",a2),err,$("div",{class:"bar"},go));
+  main.append(form);
+  go.addEventListener("click",async()=>{
+    err.replaceChildren();
+    const ssid=nets.value==="\u0000other"?other.value.trim():nets.value;
+    if(fresh&&!ssid){err.append(msg("Choose a WiFi network.","bad"));return}
+    if(a1.value!==a2.value){err.append(msg("The two admin passwords differ.","bad"));return}
+    go.disabled=true;
+    try{
+      const r=await post("/api/setup",{ssid,pass:pass.value,name:name.value,admin:a1.value});
+      renderJoining(r.host,r.ap,!!ssid);
+    }catch(e){err.append(msg(e.message,"bad"));go.disabled=false}
+  });
+}
+function renderJoining(host,ap,joining){
+  main.replaceChildren($("section",{},$("h2",{textContent:joining?"The AirMaster is joining your WiFi":"Saved. The AirMaster is restarting"}),
+    $("p",{textContent:"This network goes away now. Put this device back on your home WiFi and open:"}),
+    $("p",{class:"addr",textContent:"http://"+host+".local"}),
+    $("p",{textContent:"Write that address down or bookmark it, then add it to your home screen if you like."}),
+    joining?$("p",{textContent:"If "+ap+" comes back within about a minute, the unit could not join. Connect to it again, and this page will say why."}):"",
+    $("p",{class:"note",textContent:"If that address does not open, find the unit in your router's list of devices as "+host+", and use the IP address the router shows."})));
+}
+function bars(r){return r>=-55?"excellent":r>=-67?"good":r>=-75?"fair":"weak"}
+
+// ---------- status ----------
+function fmtF(v){return v===undefined?"–":v.toFixed(1)+" °F"}
+function diff(a,b){return a===undefined||b===undefined?"–":(a-b).toFixed(1)+" °F"}
+async function renderStatus(){
+  clearTimer();
+  const s={};
+  const tile=(k,l)=>{s[k]=$("div",{class:"v",textContent:"–"});return $("div",{},s[k],$("div",{class:"l",textContent:l}))};
+  const chips=$("div",{class:"chips"});
+  const chipEls={};
+  for(const [k,l] of [["g","Fan"],["y1","Cool 1"],["y2","Cool 2"],["w1","Heat 1"],["w2","Heat 2"],["e","Emergency"]]){chipEls[k]=$("span",{class:"chip",textContent:l});chips.append(chipEls[k])}
+  const warn=$("div"),foot=$("div",{class:"note"});
+  main.replaceChildren(warn,
+    $("section",{},$("h2",{textContent:"Thermostat calls"}),chips),
+    $("section",{},$("h2",{textContent:"Blower"}),$("div",{class:"grid"},tile("cfm","Airflow, CFM"),tile("rpm","Motor, RPM"))),
+    $("section",{},$("h2",{textContent:"Coil water"}),$("div",{class:"grid"},tile("wsup","Supply"),tile("wret","Return"),tile("wd","Return minus supply"))),
+    $("section",{},$("h2",{textContent:"Air"}),$("div",{class:"grid"},tile("asup","Supply"),tile("aret","Return"),tile("ad","Return minus supply"))),
+    foot);
+  const tick=async()=>{
+    try{
+      const d=await get("/data");
+      for(const k in chipEls)chipEls[k].classList.toggle("on",d[k]===1);
+      s.cfm.textContent=d.cfm===undefined?"–":d.cfm;s.rpm.textContent=d.rpm===undefined?"–":d.rpm;
+      s.wsup.textContent=fmtF(d.wsup);s.wret.textContent=fmtF(d.wret);s.wd.textContent=diff(d.wret,d.wsup);
+      s.asup.textContent=fmtF(d.asup);s.aret.textContent=fmtF(d.aret);s.ad.textContent=diff(d.aret,d.asup);
+      warn.replaceChildren();
+      if(d.scb_age===undefined)warn.append(msg("No data from the Unico control board. Check the USB cable."));
+      if(!d.cal)warn.append(msg("These temperatures are not calibrated, so they can read a degree or so off. Small differences between two of them may not be real."));
+      foot.textContent=(d.rssi!==undefined?"WiFi signal "+bars(d.rssi)+" ("+d.rssi+" dBm). ":"")+"Running for "+uptime(d.uptime_ms)+".";
+    }catch(e){warn.replaceChildren(msg("Cannot reach the AirMaster. Retrying.","bad"))}
+    if(tab==="status")timer=setTimeout(tick,3000);
+  };
+  tick();
+}
+function uptime(ms){const m=Math.floor(ms/60000);if(m<60)return m+" min";const h=Math.floor(m/60);if(h<48)return h+" h";return Math.floor(h/24)+" days"}
+
+// ---------- settings ----------
+async function waitJob(status){
+  for(let i=0;i<40;i++){
+    await sleep(1000);
+    const s=await get("/settings");
+    if(s.job==="idle")return s;
+    status.textContent="Working…";
+  }
+  throw new Error("The control board did not finish.");
+}
+function loginBox(after){
+  const pw=$("input",{type:"password",autocomplete:"current-password"}),err=$("div");
+  const b=$("button",{textContent:"Log in"});
+  const go=async()=>{err.replaceChildren();b.disabled=true;try{await post("/api/login",{password:pw.value});await refresh();after()}catch(e){err.append(msg(e.message,"bad"));b.disabled=false}};
+  b.addEventListener("click",go);
+  pw.addEventListener("keydown",e=>{if(e.key==="Enter")go()});
+  return $("section",{},$("h2",{textContent:"Log in to change settings"}),field("Admin password",pw),err,$("div",{class:"bar"},b));
+}
+async function renderSettings(){
+  clearTimer();
+  main.replaceChildren($("section",{},"Loading…"));
+  if(!info.logged_in){main.replaceChildren(loginBox(renderSettings));return}
+  const status=$("div",{class:"note",textContent:"Asking the control board for its settings…"});
+  main.replaceChildren($("section",{},status));
+  let s;
+  try{await post("/api/settings/read");s=await waitJob(status)}
+  catch(e){main.replaceChildren(msg(e.message,"bad"),$("div",{class:"bar"},$("button",{textContent:"Try again",on:{click:renderSettings}})));return}
+  if(s.cfm===undefined||s.result!=="read"){main.replaceChildren(msg("The control board did not report its settings: "+s.result,"bad"),$("div",{class:"bar"},$("button",{textContent:"Try again",on:{click:renderSettings}})));return}
+  draftForm(s);
+}
+function draftForm(s,note){
+  const inputs={};
+  const num=(k,val,min,max)=>inputs[k]=$("input",{type:"number",inputMode:"numeric",value:val,min,max});
+  const sel=(k,val,opts)=>{const e=$("select",{});for(const [v,l] of opts)e.append($("option",{value:v,textContent:l}));e.value=val;inputs[k]=e;return e};
+  const rows=$("tbody");
+  for(const [m,l] of MODES)rows.append($("tr",{},$("td",{textContent:l}),$("td",{},num("cfm."+m,s.cfm[m],1,s.cfm_max)),$("td",{},num("rpm."+m,s.rpm[m],s.rpm_min,s.rpm_max))));
+  const out=$("div");
+  if(note)out.append(note);
+  const save=$("button",{textContent:"Save changes"}),restore=$("button",{class:"q",textContent:"Restore original settings"}),st=$("div",{class:"note"});
+  main.replaceChildren(out,
+    $("section",{},$("h2",{textContent:"Airflow"}),$("p",{class:"note",textContent:"This model allows up to "+s.cfm_max+" CFM, and an RPM limit from "+s.rpm_min+" to "+s.rpm_max+"."}),
+      $("table",{},$("thead",{},$("tr",{},$("th",{textContent:"Call"}),$("th",{textContent:"CFM"}),$("th",{textContent:"RPM limit"}))),rows)),
+    $("section",{},$("h2",{textContent:"Air Cycle"}),
+      $("div",{class:"row"},field("Mode",sel("air.mode",s.air.mode,[["fixed","Fixed"],["auto","Auto"]])),field("Fresh air, percent",num("air.percent",s.air.percent,0,255))),
+      $("div",{class:"row"},field("Blower CFM",num("air.blower",s.air.blower,0,s.cfm_max)),field("Run, minutes",num("air.runmin",s.air.runmin,0,60))),
+      $("div",{class:"row"},field("Every, hours",num("air.interval",s.air.interval,0,24)),field("Floor area, sq ft",num("air.sqft",s.air.sqft,0,30000))),
+      $("div",{class:"row"},field("Occupants",num("air.occupants",s.air.occupants,0,51)),field("Bedrooms",num("air.bedrooms",s.air.bedrooms,0,50))),
+      field("Air cleaner relay",sel("air.eac",s.air.eac,[["off","Off"],["on","On"]]))),
+    $("section",{},$("h2",{textContent:"Control"}),
+      field("Automatic airflow",sel("auto.style",s.auto.style,[["maxcomfort","Maximum comfort"],["energysaver","Energy saver"]])),
+      field("Damper",sel("damper",s.damper,[["powerclose","Power close"],["poweropen","Power open"]]))),
+    st,
+    $("section",{},$("div",{class:"bar"},save,restore),$("p",{class:"note",textContent:"The original settings were saved the first time this unit read them, so Restore puts them back."})));
+  const orig={};for(const k in inputs)orig[k]=String(inputs[k].value);
+  const run=async(fn,done)=>{
+    save.disabled=restore.disabled=true;st.textContent="Sending to the control board…";
+    try{
+      await fn();
+      const r=await waitJob(st);
+      if(r.result==="stored"||r.result==="no change"||r.result==="read"){
+        await post("/api/settings/read");const fresh=await waitJob(st);
+        draftForm(fresh,msg(done,"ok"));scrollTo(0,0);return;
+      }
+      st.textContent="";out.replaceChildren(msg(r.result,"bad"));
+    }catch(e){st.textContent="";out.replaceChildren(msg(e.message,"bad"))}
+    save.disabled=restore.disabled=false;scrollTo(0,0);
+  };
+  save.addEventListener("click",()=>{
+    const ch={};
+    for(const k in inputs){
+      const e=inputs[k];
+      if(e.tagName==="INPUT"&&!e.checkValidity()){out.replaceChildren(msg(e.closest("tr,label").textContent.trim()+": "+e.validationMessage,"bad"));scrollTo(0,0);return}
+      if(String(e.value)!==orig[k])ch[k]=e.value;
+    }
+    const keys=Object.keys(ch);
+    if(!keys.length){out.replaceChildren(msg("Nothing has changed."));scrollTo(0,0);return}
+    confirmBox("Change "+keys.length+" setting"+(keys.length>1?"s":"")+" on the control board?",keys.map(k=>k+": "+orig[k]+" to "+ch[k]),()=>run(()=>post("/api/set",ch),"Saved. The control board reports the new values as stored."),out);
+  });
+  restore.addEventListener("click",()=>confirmBox("Put back the settings this unit first read?",[],()=>run(()=>post("/api/restore"),"The original settings are back."),out));
+}
+function confirmBox(text,lines,yes,where){
+  const list=$("ul");for(const l of lines)list.append($("li",{textContent:l}));
+  where.replaceChildren($("section",{},$("h2",{textContent:text}),lines.length?list:"",$("div",{class:"bar"},
+    $("button",{textContent:"Yes, send it",on:{click:()=>{where.replaceChildren();yes()}}}),$("button",{class:"q",textContent:"Cancel",on:{click:()=>where.replaceChildren()}}))));
+  scrollTo(0,0);
+}
+
+// ---------- unit ----------
+function renderUnit(){
+  clearTimer();
+  const out=$("div");
+  main.replaceChildren(out);
+  const about=$("section",{},$("h2",{textContent:"About"}),
+    $("p",{},info.ip?$("span",{class:"addr",textContent:"http://"+info.host+".local"}):""),
+    $("p",{class:"note",textContent:(info.ssid?"On "+info.ssid+" at "+info.ip+". ":"")+"Serial "+(info.serial||"none")+". Firmware "+info.fw+"."}));
+  main.append(about);
+  if(!info.logged_in){main.append(loginBox(renderUnit));return}
+  const name=$("input",{value:info.name,maxLength:32});
+  main.append($("section",{},$("h2",{textContent:"Name"}),field("Unit name",name),$("p",{class:"note",textContent:"A new name changes the unit's address after it restarts."}),$("div",{class:"bar"},
+    $("button",{textContent:"Save and restart",on:{click:async()=>{await act(out,async()=>{await post("/api/unit",{name:name.value});await post("/api/reboot");restarting(out)})}}}))));
+  // sensors
+  const opts=info.probes.map(p=>[p.rom,p.rom.slice(-6)+(p.f!==undefined?"  "+p.f.toFixed(1)+" °F":"  no reading")]);
+  const sup=$("select",{}),ret=$("select",{});
+  for(const [v,l] of opts){sup.append($("option",{value:v,textContent:l}));ret.append($("option",{value:v,textContent:l}))}
+  const cur=r=>{const p=info.probes.find(x=>x.role===r);return p?p.rom:""};
+  sup.value=cur("sup");ret.value=cur("ret");
+  const offs={};
+  const off=(k,l)=>{offs[k]=$("input",{type:"number",step:"0.01",value:info.offsets[k.slice(3)]});return field(l,offs[k])};
+  const sens=$("section",{},$("h2",{textContent:"Sensors"}),
+    info.by_order&&info.probes.length?msg("The water probes are assigned by bus order. Warm one in your hand to see which is which, then save."):"",
+    opts.length?$("div",{class:"row"},field("Water supply probe",sup),field("Water return probe",ret)):$("p",{class:"note",textContent:"No water probes found on the 1-wire connector."}),
+    $("p",{class:"note",textContent:"Calibration offsets, in °F, are added to each reading."}),
+    $("div",{class:"row"},off("offwsup","Water supply"),off("offwret","Water return"),off("offasup","Air supply"),off("offaret","Air return")),
+    $("div",{class:"bar"},$("button",{textContent:"Save sensors",on:{click:()=>act(out,async()=>{
+      const f={};for(const k in offs)f[k]=offs[k].value;
+      if(opts.length>=2){f.romsup=sup.value;f.romret=ret.value}
+      await post("/api/unit",f);await refresh();renderUnit();
+      main.firstChild.replaceChildren(msg("Saved.","ok"));
+    })}})));
+  main.append(sens);
+  // password
+  const a1=$("input",{type:"password",autocomplete:"new-password"}),a2=$("input",{type:"password",autocomplete:"new-password"});
+  main.append($("section",{},$("h2",{textContent:"Admin password"}),field("New password, 8 characters or more",a1),field("Again",a2),$("div",{class:"bar"},
+    $("button",{textContent:"Change password",on:{click:()=>act(out,async()=>{if(a1.value!==a2.value)throw new Error("The two passwords differ.");await post("/api/unit",{admin:a1.value});a1.value=a2.value="";out.replaceChildren(msg("Password changed.","ok"))})}}))));
+  // firmware
+  const file=$("input",{type:"file",accept:".bin"}),prog=$("div",{class:"note"});
+  main.append($("section",{},$("h2",{textContent:"Firmware update"}),field("Firmware file (.bin)",file),prog,$("div",{class:"bar"},
+    $("button",{textContent:"Install",on:{click:()=>act(out,async()=>{
+      const f=file.files[0];if(!f)throw new Error("Choose the firmware file first.");
+      prog.textContent="Sending "+Math.round(f.size/1024)+" KB. Keep this page open.";
+      await post("/api/update",null,f);restarting(out)})}}))));
+  // the rest
+  main.append($("section",{},$("h2",{textContent:"This unit"}),$("div",{class:"bar"},
+    $("button",{class:"q",textContent:"Log out",on:{click:()=>act(out,async()=>{await post("/api/logout");await refresh();renderUnit()})}}),
+    $("button",{class:"q",textContent:"Restart",on:{click:()=>act(out,async()=>{await post("/api/reboot");restarting(out)})}}),
+    $("button",{class:"d",textContent:"Erase and start over",on:{click:()=>confirmBox("Erase this unit's WiFi, name, admin password and saved original settings?",["The Unico control board keeps its current settings.","The unit then starts its setup network again, using the password on its label."],()=>act(out,async()=>{await post("/api/factory-reset");restarting(out)}),out)}})),
+    $("p",{class:"note",textContent:"Forgot the password? Power the unit off and on three times, within 30 seconds each, then join its setup network with the password on its label."})));
+}
+function restarting(out){out.replaceChildren(msg("The unit is restarting. This page will reload in 30 seconds."));setTimeout(()=>location.reload(),30000);scrollTo(0,0)}
+async function act(out,fn){out.replaceChildren();try{await fn()}catch(e){out.replaceChildren(msg(e.message,"bad"));scrollTo(0,0)}}
+
+// ---------- the frame ----------
+function show(){
+  document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.t===tab));
+  ({status:renderStatus,settings:renderSettings,unit:renderUnit})[tab]();
+}
+async function refresh(){
+  info=await get("/api/info");
+  document.getElementById("title").textContent=info.name?info.name:"AirMaster";
+  document.getElementById("sub").textContent=info.name?"AirMaster":"for Unico SMART controller";
+}
+document.getElementById("nav").addEventListener("click",e=>{if(e.target.dataset.t){tab=e.target.dataset.t;show()}});
+(async()=>{
+  try{await refresh()}catch(e){main.replaceChildren(msg("Cannot reach the AirMaster. Reload to try again.","bad"));return}
+  if(info.mode==="setup"||((info.mode==="recovery"||info.mode==="fallback")&&!sessionStorage.useUnit)){
+    renderSetup();
+    if(info.mode!=="setup")main.append($("div",{class:"bar"},$("button",{class:"q",textContent:"Skip, and see the readings",on:{click:()=>{sessionStorage.useUnit=1;location.reload()}}})));
+    return;
+  }
+  document.getElementById("nav").hidden=false;
+  show();
+})();
+</script></body></html>

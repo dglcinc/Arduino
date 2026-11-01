@@ -17,13 +17,14 @@ class ScbSetJob {
   enum State { IDLE, ELICIT, VERIFY, DONE, FAILED };
   typedef void (*SendFn)(const uint8_t *frame, size_t len);
 
-  static const size_t MAX_CHANGES = 12, KEY_LEN = 16, VAL_LEN = 12;
+  static const size_t MAX_CHANGES = 24, KEY_LEN = 16, VAL_LEN = 12;   // 24 holds every setting, for a restore
 
   State       state = IDLE;
   const char *result = "none";
   ScbSettings settings;               // the latest stored values
   bool        haveSettings = false;
   uint32_t    settingsMs = 0;
+  uint16_t    cfmMax = 0, rpmMin = 0;  // this model's limits, from the same frame
 
   explicit ScbSetJob(SendFn s) : send(s) {}
 
@@ -63,6 +64,8 @@ class ScbSetJob {
         settings = s;
         haveSettings = true;
         settingsMs = now;
+        cfmMax = scb::cfmCap(p.last);
+        rpmMin = scb::rpmFloor(p.last);
       }
     }
     if (!busy()) return;
