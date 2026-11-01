@@ -21,6 +21,12 @@
 // It tries a new home WiFi by rebooting onto it, since the radio holds one channel and a phone on the setup network would
 // drop anyway; a failure brings the setup network back with the reason. The readings carry on through all of this.
 //
+// Home Assistant, optional: the owner gives the unit an MQTT broker on the Unit page and the readings appear by MQTT discovery,
+// with one state message every 10 s. There is no TLS, so the broker's password crosses the home network in the clear. Changing
+// stored airflow from Home Assistant is a separate switch, off by default. Those changes obey the same limits as the page, wait
+// for the original settings to be saved, ignore retained messages and are held to one per MQTT_WRITE_GAP_MS and MQTT_WRITES_MAX
+// per power-up, because each is a write to the SCB's memory, whose endurance is unknown.
+//
 // The web page is compiled in, compressed (web_page.h, from AirMaster/web). Viewing is open to the network. Changes need
 // the admin password, the login cookie and the page's X-AirMaster header. The page goes over plain HTTP.
 //
@@ -67,9 +73,11 @@
 #include "ScbSetJob.h"
 #include "UnitCore.h"
 #include "HttpRequest.h"
+#include "MqttLite.h"
+#include "MqttDiscovery.h"
 #include "web_page.h"
 
-#define FW_VERSION "1.0.0"
+#define FW_VERSION "1.1.0"
 #define LOG_PORT 5515
 #ifndef ROM_WSUP
 #define ROM_WSUP { 0, 0, 0, 0, 0, 0, 0, 0 }
@@ -101,6 +109,11 @@ const uint32_t SESSION_MS      = 43200000; // 12 h
 const uint32_t LOGIN_DELAY_MS  = 2000;     // after a wrong password
 const size_t   FORM_MAX        = 1500;
 const size_t   FIRMWARE_MAX    = 1044480;  // the sketch space with the 1 MB filesystem
+const uint32_t MQTT_STATE_MS   = 10000;
+const uint32_t MQTT_RETRY_MIN_MS = 5000, MQTT_RETRY_MAX_MS = 300000;
+const uint32_t MQTT_CONNECT_MS = 3000;     // each of DNS and TCP; the two must stay well inside WDT_MS
+const uint32_t MQTT_WRITE_GAP_MS = 600000; // 10 minutes
+const int      MQTT_WRITES_MAX = 24;       // per power-up
 const uint32_t STATS_MS        = 300000;
 
 // Survive a reboot and clear at power-on, in the watchdog's scratch registers
@@ -395,7 +408,7 @@ void settingsJson(char *b, size_t len, uint32_t now) {
 
 bool saveUnit() {
   if (!fsOk) return false;
-  static char b[900];
+  static char b[1500];
   size_t n = unit::saveConfig(cfg, b, sizeof(b));
   if (n >= sizeof(b)) return false;
   File f = LittleFS.open("/unit.tmp", "w");
@@ -411,7 +424,7 @@ void loadUnit() {
   if (!fsOk) return;
   File f = LittleFS.open(CONFIG_FILE, "r");
   if (!f) return;
-  static char b[900];
+  static char b[1500];
   size_t n = f.read((uint8_t *)b, sizeof(b) - 1);
   f.close();
   b[n] = 0;
@@ -629,6 +642,168 @@ void serviceNetwork(uint32_t now) {
   }
 }
 
+// --- MQTT, for Home Assistant -------------------------------------------------------------------------
+//
+// Runs only on the home network. All of it is on core 0 in the main loop. A connection attempt can hold the loop for a few
+// seconds when the broker is down, so attempts back off to one every 5 minutes.
+
+WiFiClient       mqttNet;
+MqttLite<WiFiClient> mqtt(mqttNet);
+enum MqttPhase { MQ_IDLE, MQ_WAIT_ACK, MQ_DISCOVERY, MQ_RUN };
+MqttPhase mqPhase = MQ_IDLE;
+char     mqttStatus[64] = "off";
+char     mqId[9] = "";
+uint32_t mqNextTry = 0, mqBackoff = MQTT_RETRY_MIN_MS, mqLastState = 0, mqAckSince = 0, mqLastWrite = 0;
+size_t   mqDiscovery = 0;
+int      mqWrites = 0;
+bool     mqWroteOnce = false;
+
+mqttha::Unit mqUnit() {
+  return mqttha::Unit{mqId, cfg.name, identity.serial, FW_VERSION, hostLabel};
+}
+
+void mqttStop(const char *why) {
+  if (mqttNet.connected()) mqttNet.stop();
+  mqPhase = MQ_IDLE;
+  snprintf(mqttStatus, sizeof(mqttStatus), "%s", why);
+}
+
+void mqttRestart() {
+  mqttStop(cfg.mqttHost[0] ? "connecting" : "off");
+  mqNextTry = millis();
+  mqBackoff = MQTT_RETRY_MIN_MS;
+}
+
+void mqttAnswer(const char *text) {
+  char t[48];
+  mqttha::Unit u = mqUnit();
+  mqttha::baseTopic(u, "write_result", t, sizeof(t));
+  mqtt.publish(t, text, false, millis());
+  Log.printf("mqtt write: %s\n", text);
+}
+
+void mqttMessage(const char *topic, const char *payload, bool retained) {
+  if (!strcmp(topic, "homeassistant/status")) {   // Home Assistant restarted and wants the discovery messages again
+    if (!strcmp(payload, "online") && mqPhase == MQ_RUN) {
+      mqDiscovery = 0;
+      mqPhase = MQ_DISCOVERY;
+    }
+    return;
+  }
+  char key[ScbSetJob::KEY_LEN];
+  mqttha::Unit u = mqUnit();
+  if (!mqttha::commandKey(u, topic, key, sizeof(key))) return;
+  uint32_t now = millis();
+  // A retained command would replay on every reconnect, so it is never obeyed.
+  if (retained) { mqttAnswer("refused: retained command"); return; }
+  if (!cfg.mqttWrites) { mqttAnswer("refused: changes from Home Assistant are off"); return; }
+  if (!backupSaved) {
+    mqttAnswer("refused: the original settings are not saved yet; reading them, try again");
+    if (!job.busy()) {
+      job.clear();
+      job.begin(now, SerialHost.mounted() && haveFrame && now - lastFrameMs < SCB_REPORT_MS);
+    }
+    return;
+  }
+  if (job.busy()) { mqttAnswer("refused: a job is running"); return; }
+  if (mqWrites >= MQTT_WRITES_MAX) { mqttAnswer("refused: the limit of changes since power-up is reached"); return; }
+  if (mqWroteOnce && now - mqLastWrite < MQTT_WRITE_GAP_MS) { mqttAnswer("refused: one change per 10 minutes"); return; }
+  job.clear();
+  if (!job.add(key, payload)) { mqttAnswer("refused: not a valid airflow"); return; }
+  if (!job.begin(now, SerialHost.mounted() && haveFrame && now - lastFrameMs < SCB_REPORT_MS)) { mqttAnswer(job.result); return; }
+  mqWroteOnce = true;
+  mqLastWrite = now;
+  mqWrites++;
+  mqttAnswer("sent to the control board");
+}
+
+void serviceMqtt(uint32_t now) {
+  if (mode != M_NORMAL || !cfg.mqttHost[0] || WiFi.status() != WL_CONNECTED) {
+    if (mqPhase != MQ_IDLE) mqttStop(cfg.mqttHost[0] ? "waiting for WiFi" : "off");
+    return;
+  }
+  if (mqPhase == MQ_IDLE) {
+    if ((int32_t)(now - mqNextTry) < 0) return;
+    rp2040.wdt_reset();
+    snprintf(mqttStatus, sizeof(mqttStatus), "connecting");
+    IPAddress ip;
+    mqNextTry = now + mqBackoff;
+    mqBackoff = min(mqBackoff * 2, MQTT_RETRY_MAX_MS);
+    if (!ip.fromString(cfg.mqttHost) && !WiFi.hostByName(cfg.mqttHost, ip, MQTT_CONNECT_MS)) {
+      snprintf(mqttStatus, sizeof(mqttStatus), "cannot find the broker's name");
+      return;
+    }
+    rp2040.wdt_reset();
+    mqttNet.setTimeout(MQTT_CONNECT_MS);
+    if (!mqttNet.connect(ip, cfg.mqttPort)) {
+      snprintf(mqttStatus, sizeof(mqttStatus), "broker not answering");
+      return;
+    }
+    rp2040.wdt_reset();
+    if (!mqId[0]) {
+      strncpy(mqId, identity.valid ? identity.unitId : "bench", sizeof(mqId) - 1);
+      for (char *p = mqId; *p; p++) *p = (char)tolower((unsigned char)*p);
+    }
+    char client[32], will[48];
+    snprintf(client, sizeof(client), "airmaster-%s", mqId);
+    mqttha::Unit u = mqUnit();
+    mqttha::baseTopic(u, "status", will, sizeof(will));
+    mqtt.connect(client, cfg.mqttUser, cfg.mqttPass, will, "offline", now);
+    mqAckSince = now;
+    mqPhase = MQ_WAIT_ACK;
+    return;
+  }
+  if (!mqttNet.connected()) {
+    mqttStop("connection lost, retrying");
+    return;
+  }
+  if (!mqtt.poll(now, mqttMessage)) {
+    if (mqtt.refused == 4 || mqtt.refused == 5) mqttStop("the broker refused the user name or password");
+    else if (mqtt.refused) mqttStop("the broker refused the connection");
+    else mqttStop("broker went quiet, retrying");
+    return;
+  }
+  mqttha::Unit u = mqUnit();
+  static char topic[100], payload[900];
+  switch (mqPhase) {
+    case MQ_WAIT_ACK:
+      if (mqtt.ready) {
+        mqttha::baseTopic(u, "status", topic, sizeof(topic));
+        mqtt.publish(topic, "online", true, now);
+        mqttha::baseTopic(u, "set/#", topic, sizeof(topic));
+        mqtt.subscribe(topic, now);
+        mqtt.subscribe("homeassistant/status", now);
+        mqDiscovery = 0;
+        mqBackoff = MQTT_RETRY_MIN_MS;
+        mqPhase = MQ_DISCOVERY;
+      } else if (now - mqAckSince > MQTT_CONNECT_MS) {
+        mqttStop("the broker did not answer as MQTT");
+      }
+      break;
+    case MQ_DISCOVERY:                                // one message a pass, so the USB link keeps being read
+      if (mqttha::discovery(mqDiscovery, u, cfg.mqttWrites, 200, job.cfmMax ? job.cfmMax : 750, topic, sizeof(topic), payload, sizeof(payload))) {
+        mqtt.publish(topic, payload, true, now);
+        mqDiscovery++;
+      } else {
+        mqLastState = now - MQTT_STATE_MS;
+        snprintf(mqttStatus, sizeof(mqttStatus), "connected");
+        mqPhase = MQ_RUN;
+      }
+      break;
+    case MQ_RUN:
+      if (now - mqLastState >= MQTT_STATE_MS) {
+        mqLastState = now;
+        static char line[768];
+        buildLine(line, sizeof(line), now);
+        mqttha::baseTopic(u, "state", topic, sizeof(topic));
+        mqtt.publish(topic, line, false, now);
+      }
+      break;
+    default:
+      break;
+  }
+}
+
 // --- login ----------------------------------------------------------------------------------------
 
 LoginSession *findSession(const char *token, uint32_t now) {
@@ -697,6 +872,9 @@ void servePage(WiFiClient &c) {
   }
 }
 
+size_t ap(char *b, size_t n, size_t len, const char *fmt, ...);
+size_t apStr(char *b, size_t n, size_t len, const char *key, const char *val);
+
 size_t ap(char *b, size_t n, size_t len, const char *fmt, ...) {
   if (n >= len) return n;
   va_list args;
@@ -726,6 +904,10 @@ void infoJson(char *b, size_t len, const HttpRequest &r, uint32_t now) {
   n = apStr(b, n, len, "error", lastError);
   n = ap(b, n, len, "\"admin\":%d,\"wifi\":%d,\"logged_in\":%d,\"cal\":%d,\"by_order\":%d,\"backup\":%d,", cfg.hasAdmin() ? 1 : 0, cfg.hasWifi() ? 1 : 0,
          loggedIn(r, now) ? 1 : 0, cfg.calibrated() ? 1 : 0, romsByIndex ? 1 : 0, backupSaved ? 1 : 0);
+  n = apStr(b, n, len, "mqtt_host", cfg.mqttHost);
+  n = apStr(b, n, len, "mqtt_user", cfg.mqttUser);
+  n = apStr(b, n, len, "mqtt_state", mqttStatus);
+  n = ap(b, n, len, "\"mqtt_port\":%u,\"mqtt_pass_set\":%d,\"mqtt_writes\":%d,", cfg.mqttPort, cfg.mqttPass[0] ? 1 : 0, cfg.mqttWrites ? 1 : 0);
   n = ap(b, n, len, "\"offsets\":{\"wsup\":%.3f,\"wret\":%.3f,\"asup\":%.3f,\"aret\":%.3f},\"probes\":[", cfg.offWsup, cfg.offWret, cfg.offAsup, cfg.offAret);
   for (int i = 0; i < nFound; i++) {
     char rom[17];
@@ -834,6 +1016,21 @@ int postUnit(const char *form, char *body, size_t len) {
     memcpy(cfg.romSup, a, 8);
     memcpy(cfg.romRet, b, 8);
     useSavedProbes();
+  }
+  if (unit::formGet(form, "mqtthost", v, sizeof(v))) {       // the MQTT form always sends this
+    strcpy(cfg.mqttHost, v);
+    char u[33] = "", pw[64] = "", port[8] = "", w[4] = "";
+    unit::formGet(form, "mqttuser", u, sizeof(u));
+    strcpy(cfg.mqttUser, u);
+    if (unit::formGet(form, "mqttpass", pw, sizeof(pw)) && pw[0]) strcpy(cfg.mqttPass, pw);   // blank keeps it
+    if (unit::formGet(form, "mqttclearpass", w, sizeof(w))) cfg.mqttPass[0] = 0;
+    if (unit::formGet(form, "mqttport", port, sizeof(port))) {
+      long pn = atol(port);
+      if (pn < 1 || pn > 65535) return jobError(body, len, 400, "The MQTT port must be 1 to 65535.");
+      cfg.mqttPort = (unsigned)pn;
+    }
+    cfg.mqttWrites = unit::formGet(form, "mqttwrites", w, sizeof(w)) && w[0] == '1';
+    mqttRestart();
   }
   struct { const char *k; float *p; } offs[] = {{"offwsup", &cfg.offWsup}, {"offwret", &cfg.offWret}, {"offasup", &cfg.offAsup}, {"offaret", &cfg.offAret}};
   for (auto &o : offs) {
@@ -1057,6 +1254,7 @@ void loop() {
   uint32_t now = millis();
 
   serviceNetwork(now);
+  serviceMqtt(now);
 
   serviceUsb(now);
   job.tick(now, parser);

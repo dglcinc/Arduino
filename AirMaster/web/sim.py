@@ -12,7 +12,7 @@ S = {"cfm": dict(zip(M, (300, 300, 600, 300, 600, 600))), "rpm": dict(zip(M, (90
      "auto": {"style": "maxcomfort"}, "damper": "powerclose", "cfm_max": 750, "rpm_min": 400, "rpm_max": 1800, "age_s": 0}
 st = {"mode": MODE, "name": "" if MODE == "setup" else "Master Bedroom", "admin": "" if MODE == "setup" else "testpass1", "sessions": set(), "backup": None,
       "job_done": 0.0, "result": "none", "error": "", "t0": time.time(), "probes": [{"rom": "28aabbccdd000001", "role": "sup", "f": 49.81}, {"rom": "28aabbccdd000002", "role": "ret", "f": 55.37}],
-      "off": {"wsup": 0, "wret": 0, "asup": 0, "aret": 0}, "by_order": 1, "log": []}
+      "off": {"wsup": 0, "wret": 0, "asup": 0, "aret": 0}, "by_order": 1, "log": [], "mqtt": {"host": "", "port": 1883, "user": "", "pass": "", "writes": 0}}
 def snapshot():
     return json.loads(json.dumps(S))
 def job(result):
@@ -64,7 +64,7 @@ class H(http.server.BaseHTTPRequestHandler):
             nets = [{"ssid": "redux-test", "rssi": -48, "open": 0}, {"ssid": "Neighbor's \"Net\" <b>x</b>", "rssi": -80, "open": 0}, {"ssid": "CoffeeOpen", "rssi": -70, "open": 1}] if setup else []
             return self.send(200, {"mode": st["mode"], "fw": "1.0.0", "serial": "AM-0001", "name": st["name"], "host": hostname(st["name"]), "ap": "AirMaster-4F2A", "ssid": "" if setup else "redux-test",
                                    "ip": "" if setup else "10.0.0.50", "error": st["error"], "admin": 1 if st["admin"] else 0, "wifi": 0 if st["mode"] == "setup" else 1, "logged_in": 1 if self.logged() else 0,
-                                   "cal": 1 if any(st["off"].values()) else 0, "by_order": st["by_order"], "backup": 1 if st["backup"] else 0, "offsets": st["off"], "probes": st["probes"], "networks": nets})
+                                   "cal": 1 if any(st["off"].values()) else 0, "by_order": st["by_order"], "backup": 1 if st["backup"] else 0, "mqtt_host": st["mqtt"]["host"], "mqtt_port": st["mqtt"]["port"], "mqtt_user": st["mqtt"]["user"], "mqtt_pass_set": 1 if st["mqtt"]["pass"] else 0, "mqtt_writes": st["mqtt"]["writes"], "mqtt_state": "connected" if st["mqtt"]["host"] else "off", "offsets": st["off"], "probes": st["probes"], "networks": nets})
         return self.send(404, {"error": "not found"})
     def do_POST(self):
         p = urllib.parse.urlparse(self.path).path
@@ -103,6 +103,11 @@ class H(http.server.BaseHTTPRequestHandler):
             job("stored"); return self.send(202, {"job": "started"})
         if p == "/api/unit":
             if f.get("name"): st["name"] = f["name"]
+            if "mqtthost" in f:
+                port = int(f.get("mqttport") or 0)
+                if not 1 <= port <= 65535: return self.send(400, {"error": "The MQTT port must be 1 to 65535."})
+                st["mqtt"].update(host=f["mqtthost"], port=port, user=f.get("mqttuser", ""), writes=1 if f.get("mqttwrites") == "1" else 0)
+                if f.get("mqttpass"): st["mqtt"]["pass"] = f["mqttpass"]
             if f.get("admin"):
                 if len(f["admin"]) < 8: return self.send(400, {"error": "The admin password needs at least 8 characters."})
                 st["admin"] = f["admin"]

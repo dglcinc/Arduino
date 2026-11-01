@@ -44,11 +44,20 @@ The ledger, `~/.config/airmaster/units.csv`, and the PDFs hold every password. T
 
 If the join fails, the setup network returns within about a minute and its page gives the reason. If the unit loses its WiFi later, the setup network comes up until someone uses it or 10 minutes pass with nobody on it, then the unit tries again. For a forgotten admin password, power it off and on three times, within 30 seconds each, and join the setup network.
 
+## Home Assistant
+
+On the Unit page, under Home Assistant (MQTT), give the broker's address, and a user name and password if it needs them. Each unit then appears in Home Assistant as a device, with its four temperatures, airflow, blower speed, WiFi signal and six thermostat calls.
+
+Changing stored airflow from Home Assistant has its own switch, off by default. With it on, six number entities appear. They obey the same limits as the page and refuse retained commands. They allow one change per 10 minutes and 24 per power-up, since each one writes to the SCB's memory. The reason for each refusal is published on `airmaster/<id>/write_result`.
+
+The connection has no TLS. Topics are `airmaster/<id>/state`, `/status`, `/write_result` and `/set/cfm/<G|Y1|Y2|W1|W2|E>`, with discovery under `homeassistant/`.
+
 ## Tests
 
 | Covers | Command |
 |---|---|
 | Identity, config, passwords, HTTP | `cd AirHandlerPico/test && python3 check_unit.py` |
+| MQTT against a real broker, in a Python 3.11 venv with `amqtt paho-mqtt` | `cd AirHandlerPico/test && python -u check_mqtt.py` |
 | Factory flow, simulated board | `python3 AirMaster/factory/test_factory.py build/AirMaster.ino.uf2` |
 | The page in headless Chrome, against `web/sim.py` | `python3 AirMaster/web/test_page.py` (needs `playwright`) |
 

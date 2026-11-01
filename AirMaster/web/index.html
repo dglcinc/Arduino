@@ -261,6 +261,20 @@ function renderUnit(){
       main.firstChild.replaceChildren(msg("Saved.","ok"));
     })}})));
   main.append(sens);
+  // Home Assistant
+  const mh=$("input",{value:info.mqtt_host,placeholder:"homeassistant.local",autocapitalize:"off",autocorrect:"off"}),mport=$("input",{type:"number",value:info.mqtt_port,min:1,max:65535});
+  const mu=$("input",{value:info.mqtt_user,autocapitalize:"off",autocorrect:"off",autocomplete:"off"}),mp=$("input",{type:"password",autocomplete:"new-password",placeholder:info.mqtt_pass_set?"Saved. Leave blank to keep it.":""});
+  const mw=$("select",{},$("option",{value:"0",textContent:"No, read only"}),$("option",{value:"1",textContent:"Yes, it may change stored airflow"}));
+  mw.value=info.mqtt_writes?"1":"0";
+  main.append($("section",{},$("h2",{textContent:"Home Assistant (MQTT)"}),
+    $("p",{class:"note",textContent:"Give the address of your MQTT broker, and this unit's readings appear in Home Assistant by themselves. Leave the address blank to turn this off. Status: "+info.mqtt_state+"."}),
+    $("div",{class:"row"},field("Broker address",mh),field("Port",mport)),$("div",{class:"row"},field("User name",mu),field("Password",mp)),
+    field("Allow Home Assistant to change settings",mw),
+    $("p",{class:"note",textContent:"Changes are limited to one every 10 minutes, because each one writes to the control board's memory. The connection is not encrypted, so use a broker password you use nowhere else."}),
+    $("div",{class:"bar"},$("button",{textContent:"Save",on:{click:()=>act(out,async()=>{
+      await post("/api/unit",{mqtthost:mh.value.trim(),mqttport:mport.value,mqttuser:mu.value,mqttpass:mp.value,mqttwrites:mw.value});
+      await refresh();renderUnit();main.firstChild.replaceChildren(msg("Saved.","ok"));
+    })}}))));
   // password
   const a1=$("input",{type:"password",autocomplete:"new-password"}),a2=$("input",{type:"password",autocomplete:"new-password"});
   main.append($("section",{},$("h2",{textContent:"Admin password"}),field("New password, 8 characters or more",a1),field("Again",a2),$("div",{class:"bar"},
