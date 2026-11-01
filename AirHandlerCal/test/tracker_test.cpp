@@ -62,6 +62,25 @@ int main() {
     assert(s.t.currentPair() == 1);
     assert(s.run(LINE) == S::SETTLE);       // settling restarted from the bounce
   }
+  { // The next plug flickers while it is pushed home: no advance until both channels hold 0.5 s, and
+    // one advance only, whatever the number of flickers.
+    Sim s;
+    s.run(SOAKED);
+    s.run(3000, true);                       // pair 1 out
+    for (int i = 0; i < 5; i++) {            // five touches of 100 ms, each followed by 1.5 s open
+      s.run(STEP);
+      s.run(1500, true);
+    }
+    assert(s.t.currentPair() == 1);
+    s.run(300, false, true);                 // half seated: ret made, sup open
+    assert(s.t.currentPair() == 1);
+    s.run(400);                              // both made, not yet 0.5 s
+    assert(s.t.currentPair() == 1);
+    s.run(200);
+    assert(s.t.currentPair() == 2);
+    s.run(2 * LINE);
+    assert(s.t.currentPair() == 2);          // seated: no further advance
+  }
   { // One lead open: never logs, pair stays, even for a long time.
     Sim s;
     s.run(SOAKED);
