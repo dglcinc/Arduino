@@ -56,6 +56,8 @@ When making logic changes, edit `ArduinoPSI_BoilerLoop/ArduinoPSI_impl.h` direct
 
 `AirHandlerBench/` is a serial-only sketch for proving a shield's wiring before the node goes on WiFi: ROMs with CRC, both probe temperatures, A0 and A1 in counts, ohms and °F, and D8 with an edge count. Type `r` in the Serial Monitor to re-detect the 1-Wire master and rescan the bus; the boot banner prints before a monitor can open on the R4, so `r` is how the master line is read.
 
+`AirHandlerCal/` is the bath calibration on the fabricated shield, rev A: every DS18B20 on the bus through the DS2482 and two NTCs at a time on TB2, one CSV line every 2 s. Each NTC pair has its own plug, and the sketch moves to the next pair when a plug has been out for 1 s. Its header holds the procedure. `CalTracker.h` holds the bookkeeping and has a host test: `c++ -std=c++17 -I.. tracker_test.cpp -o /tmp/t && /tmp/t` in `AirHandlerCal/test`.
+
 `AirHandler_Bench/` is the zone sketch for the fabricated shield's last bench check: `SHIELD_PCB` defined, ROMs zero, hostname `airhandler-bench`. Flash it, unplug the USB and power the shield from TB1 alone; the node joins WiFi about 15 s after power-up and serves the zone line on port 80. It has no DHCP reservation (10.0.0.69 on 2026-10-29), so find it in the UniFi client list by MAC. With zero ROMs it scans the bus only at boot, so plug the probes in first.
 
 Both build with `arduino-cli compile -b arduino:renesas_uno:unor4wifi <folder>` once the OneWire and ArduinoGraphics libraries are installed. On an Apple Silicon Mac the R4 core's compiler is Intel-only, so it needs Rosetta.
