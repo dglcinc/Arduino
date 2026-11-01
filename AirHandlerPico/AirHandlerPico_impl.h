@@ -12,7 +12,16 @@
 // Needs the Adafruit TinyUSB library, and arduino_secrets.h in the zone's folder. To reflash, unplug 24 VAC and
 // the USB-A cable first, because the micro-USB port and the converter share pin 40. Hold BOOTSEL and plug in.
 //
-// The node only listens: nothing here writes to the SCB.
+// The node listens to the SCB until asked. Then ScbSetJob answers it just long enough to read or change its settings, in
+// the sequence scripts/unico-scb.py proved, and stops. It cannot send the thermostat override or the test bytes.
+//
+//   GET /                          the JSON line below
+//   GET /settings                  the stored settings the node last saw, and the last job's result
+//   GET /settings/read?token=T     asks the SCB for them now; read /settings a few seconds later
+//   GET /set?token=T&cfm.Y2=500    changes settings, in the Mac tool's names (ScbSettings.h); /settings shows the result
+//
+// T is SET_TOKEN in arduino_secrets.h, which needs at least 8 characters. Without it the node refuses every write. The
+// token stops an accident on the LAN and travels in the clear, so it is no protection from anyone on the network.
 //
 // Pins: native USB is the host for the Unico's USB board, through TP2 and TP3. GP4 and GP5 are I2C to the DS2482
 // and the ADS1115. GP8 Y1, GP9 Y2, GP10 W1, GP11 W2 and GP12 FAN drive the LEDs through 220 ohm. GP0 is a log.
@@ -35,6 +44,8 @@
 #include "ScbParser.h"
 #include "DS2482Bus.h"
 #include "ADS1115.h"
+#include "ScbSettings.h"
+#include "ScbSetJob.h"
 
 #ifndef LOG_HOST
 #define LOG_HOST "10.0.0.84"
@@ -58,6 +69,7 @@ const uint32_t DS_PERIOD_MS    = 2000;
 const uint32_t RESCAN_MS       = 30000;
 const uint32_t HTTP_TIMEOUT_MS = 1000;
 const uint32_t STATS_MS        = 300000;
+const size_t   REQ_MAX         = 300;
 
 // Survive a reboot and clear at power-on, in the watchdog's scratch registers
 const uint32_t SCRATCH_MAGIC = 0xA1B2C3D4;
@@ -69,7 +81,7 @@ Adafruit_USBH_Host USBHost;
 Adafruit_USBH_CDC  SerialHost;
 WiFiServer         server(80);
 WiFiUDP            udp;
-ScbParser          scb;
+ScbParser          parser;
 DS2482Bus          bus;
 ADS1115            adc;
 
@@ -90,6 +102,17 @@ uint32_t lastAdc = 0, lastDs = 0, lastScan = 0, lastStats = 0, wifiLostAt = 0;
 bool     wifiDown = false;
 
 volatile bool mountEvent = false, umountEvent = false;
+
+// A frame for the SCB, handed to core 1, which runs the USB stack and so does the write
+uint8_t       txFrame[43];
+volatile bool txPending = false;
+
+void queueFrame(const uint8_t *f, size_t n) {
+  if (txPending || n > sizeof(txFrame)) return;
+  memcpy(txFrame, f, n);
+  txPending = true;
+}
+ScbSetJob job(queueFrame);
 
 // --- log: GP0 and UDP, one packet a line -----------------------------------------------------------
 
@@ -202,9 +225,9 @@ void onFrame(uint32_t now) {
   lastFrameMs = now;
   haveFrame = true;
   SCRATCH_STALLS = 0;
-  if (scb.status.y2 && !y2Active) y2StartMs = now;
-  if (!scb.status.y2 && y2Active) y2TotalMs += now - y2StartMs;
-  y2Active = scb.status.y2;
+  if (parser.status.y2 && !y2Active) y2StartMs = now;
+  if (!parser.status.y2 && y2Active) y2TotalMs += now - y2StartMs;
+  y2Active = parser.status.y2;
 }
 
 void serviceUsb(uint32_t now) {
@@ -215,7 +238,10 @@ void serviceUsb(uint32_t now) {
   int avail = SerialHost.available();
   if (avail <= 0) return;
   int got = SerialHost.read(chunk, avail < (int)sizeof(chunk) ? avail : (int)sizeof(chunk));
-  if (got > 0 && scb.feed(chunk, got) > 0) onFrame(now);
+  if (got > 0 && parser.feed(chunk, got) > 0) {
+    onFrame(now);
+    job.onFrame(now, parser);
+  }
 }
 
 // A mounted device that goes quiet is the stall the bench saw. With nothing plugged in the node keeps running.
@@ -230,7 +256,7 @@ void watchSilence(uint32_t now) {
 
 void showLeds(uint32_t now) {
   bool fresh = haveFrame && now - lastFrameMs < LED_STALE_MS;
-  const ScbStatus &s = scb.status;
+  const ScbStatus &s = parser.status;
   digitalWrite(PIN_Y1, fresh && s.y1);
   digitalWrite(PIN_Y2, fresh && s.y2);
   digitalWrite(PIN_W1, fresh && s.w1);
@@ -256,7 +282,7 @@ void buildLine(char *b, size_t len, uint32_t now) {
   n = addF(b, n, len, "aret", aret);
   n = addF(b, n, len, "asup", asup);
   if (haveFrame && now - lastFrameMs < SCB_REPORT_MS) {
-    const ScbStatus &s = scb.status;
+    const ScbStatus &s = parser.status;
     n = addU(b, n, len, "g", s.g);
     n = addU(b, n, len, "y1", s.y1);
     n = addU(b, n, len, "y2", s.y2);
@@ -279,20 +305,102 @@ void buildLine(char *b, size_t len, uint32_t now) {
   if (n < len) snprintf(b + n, len - n, "}");
 }
 
+void settingsJson(char *b, size_t len, uint32_t now) {
+  size_t n = snprintf(b, len, "{\"job\":\"%s\",\"result\":\"%s\"", job.busy() ? "working" : "idle", job.result);
+  if (job.haveSettings && n < len) {
+    const ScbSettings &s = job.settings;
+    n += snprintf(b + n, len - n, ",\"age_s\":%lu,\"cfm\":{", (unsigned long)((now - job.settingsMs) / 1000));
+    for (int k = 0; k < 6 && n < len; k++) n += snprintf(b + n, len - n, "%s\"%s\":%u", k ? "," : "", scb::MODE_KEYS[k], s.cfm[k]);
+    if (n < len) n += snprintf(b + n, len - n, "},\"rpm\":{");
+    for (int k = 0; k < 6 && n < len; k++) n += snprintf(b + n, len - n, "%s\"%s\":%u", k ? "," : "", scb::MODE_KEYS[k], s.rpm[k]);
+    if (n < len) n += snprintf(b + n, len - n,
+      "},\"air\":{\"percent\":%u,\"blower\":%u,\"sqft\":%u,\"occupants\":%u,\"runmin\":%u,\"interval\":%u,\"bedrooms\":%u,"
+      "\"eac\":\"%s\",\"mode\":\"%s\"},\"auto\":{\"style\":\"%s\"},\"damper\":\"%s\"", s.percent, s.blower, s.sqft, s.occupants, s.runmin,
+      s.interval, s.bedrooms, s.eac ? "on" : "off", s.autoMode ? "auto" : "fixed", s.energySaver ? "energysaver" : "maxcomfort",
+      s.powerOpen ? "poweropen" : "powerclose");
+  }
+  if (n < len) snprintf(b + n, len - n, "}");
+}
+
+bool tokenOk(const char *t) {
+#ifdef SET_TOKEN
+  return strlen(SET_TOKEN) >= 8 && t && !strcmp(t, SET_TOKEN);
+#else
+  (void)t;
+  return false;
+#endif
+}
+
+// The path and query of "GET /path?a=b HTTP/1.1" are parsed in place. Returns the HTTP status and fills msg.
+int route(char *target, char *body, size_t len, uint32_t now) {
+  char *query = strchr(target, '?');
+  if (query) *query++ = 0;
+  if (!strcmp(target, "/")) { buildLine(body, len, now); return 200; }
+  if (!strcmp(target, "/settings")) { settingsJson(body, len, now); return 200; }
+  bool read = !strcmp(target, "/settings/read"), set = !strcmp(target, "/set");
+  if (!read && !set) { snprintf(body, len, "{\"error\":\"not found\"}"); return 404; }
+
+  const char *token = nullptr;
+  const char *keys[ScbSetJob::MAX_CHANGES + 1], *vals[ScbSetJob::MAX_CHANGES + 1];
+  size_t nPairs = 0;
+  for (char *p = query, *next; p && *p; p = next) {
+    next = strchr(p, '&');
+    if (next) *next++ = 0;
+    char *eq = strchr(p, '=');
+    if (!eq) { snprintf(body, len, "{\"error\":\"malformed query\"}"); return 400; }
+    *eq = 0;
+    if (!strcmp(p, "token")) { token = eq + 1; continue; }
+    if (nPairs > ScbSetJob::MAX_CHANGES) { snprintf(body, len, "{\"error\":\"too many settings\"}"); return 400; }
+    keys[nPairs] = p;
+    vals[nPairs++] = eq + 1;
+  }
+  if (!tokenOk(token)) { snprintf(body, len, "{\"error\":\"bad or missing token\"}"); return 403; }
+  if (job.busy()) { snprintf(body, len, "{\"error\":\"a job is running\"}"); return 409; }
+  job.clear();
+  if (set) {
+    if (!nPairs) { snprintf(body, len, "{\"error\":\"no settings given\"}"); return 400; }
+    for (size_t k = 0; k < nPairs; k++) {
+      if (!job.add(keys[k], vals[k])) { snprintf(body, len, "{\"error\":\"bad setting %s\"}", keys[k]); return 400; }
+    }
+  }
+  if (!job.begin(now, SerialHost.mounted() && haveFrame && now - lastFrameMs < SCB_REPORT_MS)) {
+    snprintf(body, len, "{\"error\":\"%s\"}", job.result);
+    return 503;
+  }
+  Log.printf("job started: %s\n", set ? "set" : "read");
+  snprintf(body, len, "{\"job\":\"started\"}");
+  return 202;
+}
+
 void serveClient() {
   WiFiClient client = server.accept();
   if (!client) return;
   uint32_t start = millis();
-  bool blank = true;
+  char req[REQ_MAX + 1];
+  size_t nReq = 0;
+  bool first = true, blank = true;
   while (client.connected() && millis() - start < HTTP_TIMEOUT_MS) {
     serviceUsb(millis());                        // frames keep arriving while a slow client talks
     if (!client.available()) continue;
     char c = client.read();
+    if (first) {
+      if (c == '\n') { first = false; req[nReq] = 0; }
+      else if (nReq < REQ_MAX) req[nReq++] = c;
+    }
     if (c == '\n' && blank) {
-      char line[512];
-      buildLine(line, sizeof(line), millis());
-      client.print("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n");
-      client.println(line);
+      static char body[768];
+      int code = 400;
+      char *target = strchr(req, ' ');
+      if (!strncmp(req, "GET ", 4) && target) {
+        target++;
+        char *end = strchr(target, ' ');
+        if (end) *end = 0;
+        code = route(target, body, sizeof(body), millis());
+      } else {
+        snprintf(body, sizeof(body), "{\"error\":\"GET only\"}");
+      }
+      client.printf("HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n", code, code < 300 ? "OK" : "Error");
+      client.println(body);
       break;
     }
     if (c == '\n') blank = true;
@@ -300,6 +408,14 @@ void serveClient() {
   }
   client.flush();
   client.stop();
+}
+
+void logJob() {
+  static ScbSetJob::State shown = ScbSetJob::IDLE;
+  if (job.state != shown) {
+    shown = job.state;
+    if (!job.busy()) Log.printf("job: %s\n", job.result);
+  }
 }
 
 // --- core 0: everything but the USB stack ----------------------------------------------------------
@@ -362,6 +478,8 @@ void loop() {
   }
 
   serviceUsb(now);
+  job.tick(now, parser);
+  logJob();
   serviceAdc(now);
   serviceDs(now);
   showLeds(now);
@@ -371,8 +489,8 @@ void loop() {
   if (now - lastStats >= STATS_MS) {
     lastStats = now;
     Log.printf("stats: %lu status, %lu log, %lu PC, %lu stray, %lu overflows, host %s, %.1fF %.1fF %.1fF %.1fF\n",
-               (unsigned long)scb.nStatus, (unsigned long)scb.nLog, (unsigned long)scb.nPc,
-               (unsigned long)scb.strayBytes, (unsigned long)scb.overflows,
+               (unsigned long)parser.nStatus, (unsigned long)parser.nLog, (unsigned long)parser.nPc,
+               (unsigned long)parser.strayBytes, (unsigned long)parser.overflows,
                SerialHost.mounted() ? "mounted" : "absent", wsup, wret, asup, aret);
   }
 }
@@ -386,6 +504,13 @@ void setup1() {
 
 void loop1() {
   USBHost.task();
+  if (txPending) {                             // the frame goes out from the core that runs the USB stack
+    if (SerialHost.mounted()) {
+      SerialHost.write(txFrame, sizeof(txFrame));
+      SerialHost.flush();
+    }
+    txPending = false;
+  }
 }
 
 extern "C" {

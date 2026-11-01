@@ -19,6 +19,8 @@ struct ScbStatus {
 class ScbParser {
  public:
   ScbStatus status;
+  uint8_t   last[51];                    // the latest status frame, which ScbSetJob answers
+  size_t    lastLen = 0;
   uint32_t  nStatus = 0, nLog = 0, nPc = 0, strayBytes = 0, overflows = 0;
   void    (*onStatus)(const ScbStatus &) = nullptr;   // called for every status frame
 
@@ -61,6 +63,8 @@ class ScbParser {
   static uint16_t u16(const uint8_t *f, size_t i) { return (uint16_t(f[i]) << 8) | f[i + 1]; }
 
   void decode(const uint8_t *f, size_t len) {
+    memcpy(last, f, len);
+    lastLen = len;
     uint8_t calls = f[4] >> 2;           // active-low G Y1 Y2 W1 W2 E, bit 5..0
     status.flags = f[2];
     status.g  = !(calls & 0x20);
