@@ -117,6 +117,27 @@ try:
         p.locator("input[type=file]").set_input_files(f.name); p.get_by_role("button", name="Install").click()
         p.get_by_text("restarting").wait_for(); ok(True, "firmware upload then restart message")
 
+        # Home Assistant: the page sets it up and never receives the password back
+        p = page(); p.goto(url("normal")); p.locator("nav button[data-t=unit]").click()
+        lg = p.get_by_role("button", name="Log in"); lg.wait_for()
+        p.locator("input[type=password]").fill("testpass1"); lg.click()
+        ha = p.locator("section", has_text="Home Assistant (MQTT)"); ha.wait_for()
+        ok("Status: off" in ha.inner_text(), "MQTT starts off")
+        ok(ha.locator("select").input_value() == "0", "changes from Home Assistant start off")
+        ha.locator("label", has_text="Port").locator("input").fill("70000"); ha.get_by_role("button", name="Save", exact=True).click()
+        p.get_by_text("1 to 65535").wait_for(); ok(True, "a bad port is refused")
+        ha.locator("label", has_text="Broker address").locator("input").fill("192.168.1.5")
+        ha.locator("label", has_text="Port").locator("input").fill("1883")
+        ha.locator("label", has_text="User name").locator("input").fill("airmaster")
+        ha.locator("label", has_text="Password").locator("input").fill("brokerpass9")
+        ha.get_by_role("button", name="Save", exact=True).click(); p.locator(".msg.ok").wait_for()
+        info = p.evaluate("fetch('/api/info').then(r=>r.json())")
+        ok(info["mqtt_host"] == "192.168.1.5" and info["mqtt_pass_set"] == 1 and "brokerpass9" not in str(info), "saved, and the password does not come back")
+        ha = p.locator("section", has_text="Home Assistant (MQTT)")
+        ok("connected" in ha.inner_text(), "the status shows on the page")
+        ok("Saved" in ha.locator("label", has_text="Password").locator("input").get_attribute("placeholder"), "a saved password shows as saved")
+        p.screenshot(path=SHOTS + "/mqtt.png", full_page=True)
+
         # the rules a page cannot get round
         p = page(); p.goto(url("normal"))
         p.get_by_text("Airflow, CFM").wait_for()

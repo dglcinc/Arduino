@@ -241,6 +241,11 @@ struct UnitConfig {
   char  hash[HASH_HEX + 1] = "";
   uint8_t romSup[8] = {0}, romRet[8] = {0};   // zero: the first two probes in search order
   float offWsup = 0, offWret = 0, offAsup = 0, offAret = 0;   // degrees F, added to the reading
+  char  mqttHost[64] = "";                    // empty: MQTT off
+  char  mqttUser[33] = "";
+  char  mqttPass[64] = "";
+  unsigned mqttPort = 1883;
+  bool  mqttWrites = false;                   // Home Assistant may change stored airflow; the owner opts in
 
   bool hasWifi() const { return ssid[0] != 0; }
   bool hasAdmin() const { return hash[0] != 0; }
@@ -249,14 +254,17 @@ struct UnitConfig {
 
 // One key=value line each. SSID, WiFi password and unit name are hex, since they can hold any character.
 inline size_t saveConfig(const UnitConfig &c, char *b, size_t len) {
-  char ssid[67], pass[129], name[67], ra[17], rb[17];
+  char ssid[67], pass[129], name[67], ra[17], rb[17], mh[129], mu[67], mp[129];
+  toHex((const uint8_t *)c.mqttHost, strlen(c.mqttHost), mh);
+  toHex((const uint8_t *)c.mqttUser, strlen(c.mqttUser), mu);
+  toHex((const uint8_t *)c.mqttPass, strlen(c.mqttPass), mp);
   toHex((const uint8_t *)c.ssid, strlen(c.ssid), ssid);
   toHex((const uint8_t *)c.pass, strlen(c.pass), pass);
   toHex((const uint8_t *)c.name, strlen(c.name), name);
   toHex(c.romSup, 8, ra);
   toHex(c.romRet, 8, rb);
-  return snprintf(b, len, "v=1\nssid=%s\npass=%s\nname=%s\nsalt=%s\nhash=%s\nromsup=%s\nromret=%s\noffwsup=%.3f\noffwret=%.3f\noffasup=%.3f\noffaret=%.3f\n",
-                  ssid, pass, name, c.salt, c.hash, ra, rb, c.offWsup, c.offWret, c.offAsup, c.offAret);
+  return snprintf(b, len, "v=1\nssid=%s\npass=%s\nname=%s\nsalt=%s\nhash=%s\nromsup=%s\nromret=%s\noffwsup=%.3f\noffwret=%.3f\noffasup=%.3f\noffaret=%.3f\nmh=%s\nmu=%s\nmp=%s\nmport=%u\nmw=%d\n",
+                  ssid, pass, name, c.salt, c.hash, ra, rb, c.offWsup, c.offWret, c.offAsup, c.offAret, mh, mu, mp, c.mqttPort, c.mqttWrites ? 1 : 0);
 }
 
 inline bool hexField(const char *v, char *out, size_t outLen) {
@@ -293,6 +301,11 @@ inline bool loadConfig(char *text, UnitConfig &out) {
     else if (!strcmp(k, "offwret")) c.offWret = strtof(v, nullptr);
     else if (!strcmp(k, "offasup")) c.offAsup = strtof(v, nullptr);
     else if (!strcmp(k, "offaret")) c.offAret = strtof(v, nullptr);
+    else if (!strcmp(k, "mh")) ok = hexField(v, c.mqttHost, sizeof(c.mqttHost));
+    else if (!strcmp(k, "mu")) ok = hexField(v, c.mqttUser, sizeof(c.mqttUser));
+    else if (!strcmp(k, "mp")) ok = hexField(v, c.mqttPass, sizeof(c.mqttPass));
+    else if (!strcmp(k, "mport")) c.mqttPort = (unsigned)strtoul(v, nullptr, 10);
+    else if (!strcmp(k, "mw")) c.mqttWrites = v[0] == '1';
     if (!ok) return false;
   }
   if (!sawVersion) return false;

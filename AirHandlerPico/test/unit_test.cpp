@@ -65,7 +65,12 @@ int main(int argc, char **argv) {
     hashPassword("x", c.salt, c.hash);
     c.romSup[0] = 0x28; c.romSup[7] = 0xAB;
     c.offAret = -0.25f;
-    char b[900];
+    strcpy(c.mqttHost, "broker.local");
+    strcpy(c.mqttUser, "ha user");
+    strcpy(c.mqttPass, "p&ss=%");
+    c.mqttPort = 1884;
+    c.mqttWrites = true;
+    char b[1500];
     size_t n = saveConfig(c, b, sizeof(b));
     assert(n < sizeof(b));
     UnitConfig o;
@@ -73,6 +78,10 @@ int main(int argc, char **argv) {
     assert(!strcmp(o.ssid, c.ssid) && !strcmp(o.pass, c.pass) && !strcmp(o.name, c.name) && !strcmp(o.hash, c.hash));
     assert(o.romSup[0] == 0x28 && o.romSup[7] == 0xAB && o.romRet[0] == 0);
     assert(o.offAret == -0.25f && o.calibrated() && o.hasWifi() && o.hasAdmin());
+    assert(!strcmp(o.mqttHost, "broker.local") && !strcmp(o.mqttUser, "ha user") && !strcmp(o.mqttPass, "p&ss=%") && o.mqttPort == 1884 && o.mqttWrites);
+    char oldFile[] = "v=1\nssid=4142\n";            // a file saved before MQTT existed
+    UnitConfig older;
+    assert(loadConfig(oldFile, older) && !strcmp(older.ssid, "AB") && !older.mqttHost[0] && older.mqttPort == 1883 && !older.mqttWrites);
     char junk[] = "this is not a config";
     UnitConfig untouched;
     assert(!loadConfig(junk, untouched) && !untouched.hasWifi());
@@ -80,11 +89,14 @@ int main(int argc, char **argv) {
     assert(!loadConfig(noVersion, untouched));
     char badHex[] = "v=1\nssid=zz\n";
     assert(!loadConfig(badHex, untouched));
-    char maxed[900];
+    char maxed[1500];
     UnitConfig m;
     memset(m.ssid, 'a', 32);
     memset(m.pass, 'b', 63);
     memset(m.name, 'c', 32);
+    memset(m.mqttHost, 'd', 63);
+    memset(m.mqttUser, 'e', 32);
+    memset(m.mqttPass, 'f', 63);
     assert(saveConfig(m, maxed, sizeof(maxed)) < sizeof(maxed));
   }
   { // forms
