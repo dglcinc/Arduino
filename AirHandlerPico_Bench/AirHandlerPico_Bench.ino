@@ -4,6 +4,7 @@
 // bus in search order and logs every ROM it finds.
 
 #define HOSTNAME       "airhandler-bench"
+#define LOG_HOST       "10.0.0.84"
 
 #define ROM_WSUP       { 0, 0, 0, 0, 0, 0, 0, 0 }
 #define ROM_WRET       { 0, 0, 0, 0, 0, 0, 0, 0 }

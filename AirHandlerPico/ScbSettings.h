@@ -12,6 +12,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <stdio.h>
 
 struct ScbSettings {
   uint16_t cfm[6] = {0}, rpm[6] = {0};   // G Y1 Y2 W1 W2 E
@@ -201,6 +202,19 @@ inline bool applyChange(ScbSettings &s, const char *key, const char *val) {
     return true;
   }
   return false;
+}
+
+// Every setting as a form, in applyChange()'s names: what the unit saves before its first change, and a restore sends.
+inline size_t settingsForm(const ScbSettings &s, char *b, size_t len) {
+  size_t n = 0;
+  for (int k = 0; k < 6; k++) n += snprintf(b + n, n < len ? len - n : 0, "cfm.%s=%u&", MODE_KEYS[k], s.cfm[k]);
+  for (int k = 0; k < 6; k++) n += snprintf(b + n, n < len ? len - n : 0, "rpm.%s=%u&", MODE_KEYS[k], s.rpm[k]);
+  n += snprintf(b + n, n < len ? len - n : 0,
+                "air.percent=%u&air.blower=%u&air.sqft=%u&air.occupants=%u&air.runmin=%u&air.interval=%u&air.bedrooms=%u&"
+                "air.eac=%s&air.mode=%s&auto.style=%s&damper=%s",
+                s.percent, s.blower, s.sqft, s.occupants, s.runmin, s.interval, s.bedrooms, s.eac ? "on" : "off",
+                s.autoMode ? "auto" : "fixed", s.energySaver ? "energysaver" : "maxcomfort", s.powerOpen ? "poweropen" : "powerclose");
+  return n;
 }
 
 }  // namespace scb
