@@ -60,6 +60,10 @@ When making logic changes, edit `ArduinoPSI_BoilerLoop/ArduinoPSI_impl.h` direct
 
 Both build with `arduino-cli compile -b arduino:renesas_uno:unor4wifi <folder>` once the OneWire and ArduinoGraphics libraries are installed. On an Apple Silicon Mac the R4 core's compiler is Intel-only, so it needs Rosetta.
 
+### Air-handler node on the Pico W carrier
+
+`AirHandlerPico/` is the node for the Pico W carrier (pivac `docs/air-handler-shield-pcb-plan.md` §0), and each zone is a folder with its own `.ino` and symlinks, as `AirHandlerPico_Bench`. It reads the Unico SCB through the RP2040's built-in USB host on core 1, and answers it only to read or change its settings (`/settings`, `/settings/read`, `/set`, with `SET_TOKEN`), never sending the override or test bytes. It runs the DS2482 and ADS1115 on GP4 and GP5, drives the status LEDs on GP8 to GP12, and serves one JSON line that `pivac.UnicoSCB` and `pivac.ArduinoSensor` can both parse. Build with `-b rp2040:rp2040:rpipicow:usbstack=tinyusb_host`. `ScbParser.h`, `ScbSettings.h` and `ScbSetJob.h` have no Arduino calls; after changing them, run `AirHandlerPico/test/check_parser.py`, `check_writer.py` and `writer_test sim`, which compare them with pivac's Python and a simulated SCB. The node reboots on a mounted but silent USB device, doubling the wait up to 10 minutes while no frame arrives, and it keeps running with nothing plugged in.
+
 ## Known Issues / Notes
 
 **WiFi credentials are in `arduino_secrets.h` (gitignored).** Each sketch folder contains an `arduino_secrets.h` that defines `SECRET_SSID` and `SECRET_PASS`. This file is listed in `.gitignore` and is not committed. If you clone the repo fresh, copy `arduino_secrets.h.example` from the repo root to each sketch folder and fill in your credentials. Note that credentials were previously committed inline in the `.ino` files — the git history retains that, but they are no longer committed going forward.
