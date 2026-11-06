@@ -181,6 +181,32 @@ bool readOne(uint16_t addr, uint16_t *out) {
   return false;
 }
 
+// Block read for the pivac poller: `r <lo> <n>`.  One function 03 request
+// for n consecutive registers, printed on a single line so the Pi can read a
+// whole sweep of 0-146 and 200-286 in about a second:
+//     R <lo> <n> v0 v1 ... v(n-1)      values as signed 16-bit integers
+//     E <lo> <n> <rc>                  ModbusMaster failure code, hex
+// Chiltrix (Matt Dail, 2026-11-06): the controller answers a read of every
+// register at once and their own tools use blocks of 50.  ModbusMaster's
+// response buffer holds 64 words, which caps n here.
+void block(uint16_t lo, uint16_t n) {
+  if (n < 1 || n > 64) { Serial.print(F("E ")); Serial.print(lo); Serial.print(F(" "));
+                         Serial.print(n); Serial.println(F(" count")); return; }
+  delay(15);                       // the inter-frame gap readOne explains
+  node.clearResponseBuffer();
+  uint8_t rc = node.readHoldingRegisters(lo, n);
+  lastRc = rc;
+  if (rc != node.ku8MBSuccess) {
+    Serial.print(F("E ")); Serial.print(lo); Serial.print(F(" ")); Serial.print(n);
+    Serial.print(F(" ")); Serial.println(rc, HEX); return;
+  }
+  Serial.print(F("R ")); Serial.print(lo); Serial.print(F(" ")); Serial.print(n);
+  for (uint16_t i = 0; i < n; i++) {
+    Serial.print(F(" ")); Serial.print((int16_t)node.getResponseBuffer(i));
+  }
+  Serial.println();
+}
+
 void printRow(uint16_t addr, uint16_t raw) {
   int16_t  s = (int16_t)raw;
   float    c = s / 10.0f;
@@ -386,6 +412,7 @@ void menu() {
   Serial.println(F("  s <a> <b>    scan a range"));
   Serial.println(F("  w            watch 281 205 213 227 256 (in/out/flow/Hz/A)"));
   Serial.println(F("  w <a> ...    watch up to 6 addresses"));
+  Serial.println(F("  r <a> <n>    read n registers from a in one request, one line"));
   Serial.println(F("  b <baud>     set baud"));
   Serial.println(F("  i <id>       set slave id"));
   Serial.println(F("  ?            this menu"));
@@ -412,6 +439,11 @@ void handle(char *line) {
     uint16_t a = 0, b = 400;
     if (*arg) { a = atoi(strtok(arg, " ")); char *t = strtok(NULL, " "); b = t ? atoi(t) : a + 50; }
     scan(a, b); return;
+  }
+  if (cmd == 'r') {
+    uint16_t a = 0, n = 1;
+    if (*arg) { a = atoi(strtok(arg, " ")); char *t = strtok(NULL, " "); n = t ? atoi(t) : 1; }
+    block(a, n); return;
   }
   if (cmd == 'w') {
     uint16_t addrs[6]; uint8_t n = 0;
