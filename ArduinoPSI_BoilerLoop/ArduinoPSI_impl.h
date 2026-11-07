@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // ArduinoPSI_impl.h — shared implementation for all ArduinoPSI sketches.
 //
 // ArduinoPSI_Domestic/ArduinoPSI_impl.h is a SYMLINK to this file, so both

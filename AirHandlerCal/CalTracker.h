@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // CalTracker.h — the bath calibration's bookkeeping: which pair is plugged in, whether its reading has
 // settled, whether the bath is flat, and when enough has been logged. No hardware here, so
 // test/tracker_test.cpp runs it on the Mac.

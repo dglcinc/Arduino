@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // MqttLite.h: the small part of MQTT 3.1.1 the AirMaster needs, QoS 0 only, with no Arduino calls, so test/check_mqtt.py runs
 // it against a real broker on the Mac. T supplies size_t write(const uint8_t *, size_t), int available(), int read() and
 // bool connected(). A received packet too long for the buffer is read and dropped: commands here are short.

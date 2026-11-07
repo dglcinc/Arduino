@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // DomesticWater — whole-house water meter node (UNO R4 WiFi)
 //
 // Meter: DAE MJ-75a, 0.1 gal/pulse, 2-wire dry-contact reed on D2.

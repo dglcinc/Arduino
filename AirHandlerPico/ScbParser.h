@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // ScbParser.h: the Unico SCB's serial framing and status decode, ported from pivac's
 // pivac/unico_scb_protocol.py (split_frames, decode_status). pivac docs/unico-scb-protocol.md is the
 // specification. Plain C++ with no Arduino calls, so test/ can run it on a computer against the Python.

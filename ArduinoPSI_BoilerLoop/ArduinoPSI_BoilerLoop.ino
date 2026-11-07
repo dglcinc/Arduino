@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // ArduinoPSI_BoilerLoop — Fusch 100 PSI sensor, IP 10.0.0.219 (boiler/hydronic board; DHCP-reserved by MAC)
 //
 // All shared logic lives in ArduinoPSI_impl.h. The only things that differ

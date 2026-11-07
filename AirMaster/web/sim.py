@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+# Copyright David Lewis
 """A stand-in for the unit, to develop and test the page in a browser with no hardware: python3 sim.py [setup|fallback|recovery|normal]
 Serves index.html and answers the API from memory, with the firmware's rules for login, the X-AirMaster header and the backup.
 The admin password starts as testpass1 in any mode but setup. It runs on localhost only."""

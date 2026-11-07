@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // AirHandler_impl.h — shared implementation for the air-handler nodes.
 //
 // Each zone is a folder with its own .ino that defines the zone's constants and then includes this

@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: CC-BY-NC-4.0 -->
+<!-- Copyright David Lewis -->
+
 # AirMaster: build, label and flash
 
 An AirMaster works with no pivac. It serves its own web page, and its owner connects with a phone, tablet or computer. Each unit has its own setup password, printed on its label.

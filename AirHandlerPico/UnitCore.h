@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // UnitCore.h: what makes a board one particular AirMaster, with no hardware in it, so test/unit_test.cpp runs it on the
 // Mac: the factory identity, the saved configuration, password hashing and the small text helpers the web side needs.
 //

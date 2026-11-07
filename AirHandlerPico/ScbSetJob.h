@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // ScbSetJob.h: one read or write of the SCB's settings, in the order scripts/unico-scb.py proved on 2026-10-24.
 //
 // Every frame sent to the SCB is a write request, so the job answers only while it runs and then stops. It sends the idle

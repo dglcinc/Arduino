@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+# Copyright David Lewis
 """Print AirMaster labels ahead of time, then flash boards and match each to the next unused label.
 
 `sheet` makes a Letter page of 12 labels and gives each its own serial number, unit id for the setup network and random
