@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // Runs ScbParser over a byte stream on a computer: read stdin, print one line per status frame.
 // c++ -std=c++17 -I.. parser_test.cpp -o parser_test && python3 check_parser.py ./parser_test
 #include <cstdio>

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+# Copyright David Lewis
 """The factory flow against a simulated board: python3 test_factory.py [path to AirMaster.ino.uf2]. A stub picotool keeps the
 board's flash in a file. Also runs the identity through the firmware's own parser (AirHandlerPico/test/unit_test)."""
 import csv, json, os, stat, struct, subprocess, sys, tempfile

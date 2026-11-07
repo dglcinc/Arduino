@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // AirHandler_Utility — utility zone air-handler node on the rev A shield
 // (pivac docs/utility-air-handler-node-plan.md).
 //

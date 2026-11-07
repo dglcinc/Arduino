@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // ScbSettings.h: the SCB's stored settings and the frames that request them, ported from pivac's
 // pivac/unico_scb_protocol.py (stored_settings, answer_frame, idle_frame) and the limits and key names of
 // scripts/unico-scb.py (check_limits, parse_changes). Plain C++, so test/ can compare it with the Python.

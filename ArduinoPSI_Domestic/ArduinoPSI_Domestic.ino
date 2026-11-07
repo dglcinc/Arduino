@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // ArduinoPSI_Domestic — Fusch 200 PSI sensor, IP 10.0.0.114 (DHW board; DHCP-reserved by MAC)
 //
 // All shared logic lives in ArduinoPSI_impl.h. The only things that differ

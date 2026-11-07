@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // Host test of CalTracker: c++ -std=c++17 -I.. tracker_test.cpp -o /tmp/t && /tmp/t
 #include <cassert>
 #include <cstdio>

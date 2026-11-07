@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // AirHandler_MBR — master bedroom air-handler node (pivac docs/mbr-air-handler-node-plan.md).
 //
 // All logic lives in AirHandler_impl.h, a symlink to ../AirHandler/AirHandler_impl.h. This file holds

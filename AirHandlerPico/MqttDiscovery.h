@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // MqttDiscovery.h: the Home Assistant MQTT discovery messages for one unit, with no Arduino calls. Each entity is one retained
 // message under homeassistant/, read from the unit's one JSON state message. A reading the unit left out renders as None,
 // which Home Assistant shows as unknown. The number entities exist only while the owner allows changes from Home Assistant.

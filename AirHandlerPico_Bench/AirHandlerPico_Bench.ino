@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // AirHandlerPico_Bench: the Pico W carrier's zone sketch for the bench. All logic is in AirHandlerPico_impl.h, a
 // symlink to ../AirHandlerPico. Copy arduino_secrets.h.example from the repo root to arduino_secrets.h in this folder
 // and fill in the WiFi credentials before building. The ROMs are zero, so the node reads the first two probes on the

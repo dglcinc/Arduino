@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // Host test of UnitCore.h and HttpRequest.h. "vectors" prints values for check_unit.py to compare with Python's hashlib
 // and zlib; with no argument it runs the asserts.
 #include <cassert>

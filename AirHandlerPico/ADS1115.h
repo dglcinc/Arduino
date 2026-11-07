@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // ADS1115.h: U3 on the Pico W carrier, at I2C 0x48 with ADDR grounded. AIN0 and AIN1 are the supply and
 // return NTC dividers and AIN2 is the 3.3 V rail that feeds them, so a reading is the ratio of the two
 // and the rail's own value cancels. AIN3 is tied to 3.3 V and never read.

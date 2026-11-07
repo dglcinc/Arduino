@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // AirHandlerCal — bath calibration of every DS18B20 and every air NTC in one session, on the fabricated
 // shield, rev A. Serial only, 115200, no WiFi.
 //

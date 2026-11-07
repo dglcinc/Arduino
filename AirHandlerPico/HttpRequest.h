@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // HttpRequest.h: reads one HTTP request's start line and headers, a byte at a time, so the caller can keep servicing the
 // USB link between bytes. Plain C++ for test/unit_test.cpp. It keeps only what the routes use.
 

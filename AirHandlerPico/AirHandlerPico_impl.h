@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // AirHandlerPico_impl.h: the AirMaster firmware, on the Pico W carrier, Rev B (pivac docs/air-handler-shield-pcb-plan.md §0).
 //
 // The product sketch is AirMaster/. Each zone or bench folder is a .ino that defines its constants and includes this file

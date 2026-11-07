@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // DS2482Bus.h: the Pico W carrier's 1-Wire bus on U2, a DS2482-100 at I2C 0x18 on GP4 and GP5, and the
 // DS18B20 commands. The chip supplies the bus pull-up. The DS2482 sequences are those of
 // AirHandler/OneWireBus.h, proven on the shield; the D2 fallback is gone, because this board has no such path.

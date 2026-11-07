@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // UnicoSCBBench — bench test of the USB host route to a Unico S.M.A.R.T. Control Board (SCB).
 //
 // Board: Adafruit Feather RP2040 USB Host (product 5723). The Unico USB board in the air handler's
