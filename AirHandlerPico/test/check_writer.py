@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+# Copyright David Lewis
 """Compares ScbSettings.h with pivac's unico_scb_protocol.py and scripts/unico-scb.py's limits on random 51-byte frames and
 changes. Usage: check_writer.py ./writer_test [path to pivac]"""
 import importlib.util, os, random, subprocess, sys

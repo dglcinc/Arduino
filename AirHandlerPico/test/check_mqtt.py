@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+# Copyright David Lewis
 """MqttLite and MqttDiscovery against a real broker: needs `pip install amqtt paho-mqtt`. Run from AirHandlerPico/test. Proves the
 broker accepts the packets, every discovery payload is valid JSON with the keys Home Assistant requires, the will fires on a
 dropped link, commands arrive with their retain flag, and a refused login is reported. It does not run Home Assistant."""

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // Host side of check_mqtt.py: MqttLite and MqttDiscovery over a real socket. Connects, publishes discovery and state, prints
 // each message it receives, and on a "die" message drops the socket without saying goodbye, to prove the will.
 #include <arpa/inet.h>

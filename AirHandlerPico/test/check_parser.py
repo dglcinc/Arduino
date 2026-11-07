@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+# Copyright David Lewis
 """Compares ScbParser.h with pivac's unico_scb_protocol.py on the same random bus traffic: every frame length,
 PC and log frames, motor-bus noise and corrupted frames. Usage: check_parser.py ./parser_test [path to pivac]"""
 import os, random, subprocess, sys

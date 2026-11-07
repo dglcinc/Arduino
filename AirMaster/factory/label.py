@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+# Copyright David Lewis
 """One AirMaster's label, full size: the generic label from pivac hardware/label/gen-label.py with the title block moved up
 to make room for the unit's setup details and a QR code that joins its setup network. Every pointer and pin letter sits at
 its part's true position, as on the generic label. Coordinates are millimetres from the box's centre, seen from outside

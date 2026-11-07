@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+# Copyright David Lewis
 """Drives index.html against sim.py in headless Chrome, at phone size. Needs `pip install playwright` and Chrome itself:
 python3 test_page.py [folder for screenshots]. Exercises first setup, recovery, login, a settings change, its limits,
 restore, sensors and the firmware upload, and fails on any browser error."""

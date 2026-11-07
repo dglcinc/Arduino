@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // AirHandler_Bench — the zone sketch on the fabricated shield, for its final bench run on 24 VAC alone
 // (pivac docs/air-handler-shield-assembly.md, Checks).
 //

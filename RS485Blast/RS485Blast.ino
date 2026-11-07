@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 /*
  * RS485Blast -- diagnostic only.  Saturates the RS-485 driver so a DC meter
  * across A/B can tell "the shield is driving" from "the shield is mute".

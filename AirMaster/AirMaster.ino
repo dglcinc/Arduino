@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // AirMaster: the product build. All logic is in AirHandlerPico_impl.h, a symlink to ../AirHandlerPico. It has no WiFi or
 // passwords compiled in: AirMaster/factory writes each board's identity and the owner sets the rest from a browser.
 // Build it with the 1 MB filesystem, which saved settings and firmware updates need:

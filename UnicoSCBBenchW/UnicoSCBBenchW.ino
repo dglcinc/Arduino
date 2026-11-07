@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // UnicoSCBBenchW: the Unico SCB over the Pico W's built-in USB host, with WiFi running.
 //
 // Board: Raspberry Pi Pico W or WH. The Unico USB board plugs into the Pico's micro-USB port through

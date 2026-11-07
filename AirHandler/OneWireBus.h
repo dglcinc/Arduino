@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // OneWireBus.h — the air-handler nodes' 1-Wire bus, on a DS2482-100 or on D2, chosen at boot.
 //
 // The fabricated shield (pivac docs/air-handler-shield-pcb-plan.md §4.5) drives the bus from U2, a

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // Two checks away from the hardware. "frames" reads lines of a 51-byte frame in hex plus key=value changes and prints
 // the C++ results for check_writer.py to compare with the Python. "sim" runs ScbSetJob against a simulated SCB.
 #include <cstdio>

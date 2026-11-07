@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // UnicoSCBBenchP: the Unico SCB over PIO-USB on two GPIOs of a Pico W, with WiFi running.
 //
 // Board: Raspberry Pi Pico W or WH. The Unico USB board plugs into a USB-A jack wired to GP16 (D+,

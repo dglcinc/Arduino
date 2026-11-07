@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Copyright David Lewis
 // AirHandlerBench — bench test for the master bedroom air-handler node's PROTO-SHIELD.
 //
 // No WiFi and no HTTP: this sketch only proves the shield's wiring before the node's real sketch

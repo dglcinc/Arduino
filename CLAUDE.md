@@ -1,5 +1,7 @@
 # CLAUDE.md — Arduino (project-specific)
 
+**Licensing (since 2026-11-07):** code is PolyForm Noncommercial 1.0.0 (`LICENSE`), documents CC BY-NC 4.0 (`LICENSE-DOCS`); commercial use needs a separate licence from David. Every new source file starts with `// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0` and `// Copyright David Lewis` (`#` in Python). `AirMaster/web/build_page.py` writes the same two lines into `web_page.h`. The README's Licensing section is the public statement.
+
 > Working style, machine detection, and GitHub conventions are in the global context:
 > `<github-dir>/claude-contexts/CLAUDE.md`
 >

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+# Copyright David Lewis
 """Compares unit_test's SHA-256, password hash and CRC-32 with Python's. Run from AirHandlerPico/test."""
 import hashlib, subprocess, sys, zlib, tempfile, os
 t = os.path.join(tempfile.gettempdir(), "am_unit_test")
