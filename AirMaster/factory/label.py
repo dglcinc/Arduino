@@ -12,7 +12,7 @@ import segno
 CHROME = os.environ.get("AIRMASTER_CHROME", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 HW, HH = 28.0, 29.5                # label half width and height
 SY, NH, NX = 7.33, 3.7, 21.3       # screw height, notch half height, notch inner x
-INK, GREY, BLUE = "#111111", "#777777", "#1b4f9c"            # BLUE: JLCPCB blue solder mask
+INK, GREY, BLUE = "#111111", "#777777", "#002966"            # BLUE: JLCPCB blue solder mask, sampled from its order preview
 FONT = "Helvetica Neue, Helvetica, Arial, sans-serif"
 MONO = "Menlo, Consolas, monospace"
 LEDS = (("PWR", 1.5, "#18a848"), ("FAN", -2.5, "#e8b400"), ("Y1", -6.5, "#1f5fd8"), ("Y2", -10.5, "#1f5fd8"),
