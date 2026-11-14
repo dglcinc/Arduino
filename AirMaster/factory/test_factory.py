@@ -126,7 +126,7 @@ def main():
 
     # Passwords: alphabet, length, and no repeats in a batch
     pws = {af.new_password() for _ in range(2000)}
-    assert len(pws) == 2000 and all(len(p) == 14 and set(p) <= set(af.ALPHABET + "-") for p in pws)
+    assert len(pws) == 2000 and all(len(p) == 8 and set(p) <= set(af.ALPHABET) for p in pws)
     print("factory flow ok,", len(fw) // 512, "firmware blocks")
 
     # The firmware's parser agrees with this tool's page

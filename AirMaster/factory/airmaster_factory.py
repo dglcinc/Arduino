@@ -54,7 +54,9 @@ def parse_identity(p):
 
 
 def new_password():
-    return "-".join("".join(secrets.choice(ALPHABET) for _ in range(4)) for _ in range(3))
+    """Eight characters, about 40 bits: short enough to type on a phone in one keyboard mode, and the setup network
+    is up only during setup or after the unit loses its WiFi. WPA2 needs at least 8."""
+    return "".join(secrets.choice(ALPHABET) for _ in range(8))
 
 
 # --- UF2 ----------------------------------------------------------------------------------------------
