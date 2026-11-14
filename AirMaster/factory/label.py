@@ -131,9 +131,11 @@ def _page(w, h, body):
 def sheet_pdf(units, path):
     """Letter pages of 12 labels, in serial order, with a scale check. units: dicts with serial, unit_id, password."""
     w, h = 2 * HW, 2 * HH
-    left, top, gap_x, gap_y = 18.0, 7.0, 6.0, 4.0
+    gap_x, gap_y, top = 6.0, 2.5, 6.0
+    left = (215.9 - 3 * w - 2 * gap_x) / 2          # centred across Letter
+    bar_top = top + 4 * h + 3 * gap_y + 3.0          # 3 mm under the last row
     spots = [(left + c * (w + gap_x), top + r * (h + gap_y)) for r in range(4) for c in range(3)]
-    bar = ('<div style="position:absolute;left:18mm;top:257mm;font:8pt Helvetica,Arial,sans-serif">'
+    bar = (f'<div style="position:absolute;left:{left:.1f}mm;top:{bar_top:.1f}mm;width:{3 * w + 2 * gap_x:.1f}mm;font:8pt Helvetica,Arial,sans-serif">'
            '<div style="width:50mm;height:1.5mm;background:#111"></div>'
            '<div style="margin-top:1mm">Print at 100 %: this bar must measure 50 mm. Cut on the grey line, including the left notch and the right slot, which clear the cover screws and the LED holes.</div></div>')
     pages = []
