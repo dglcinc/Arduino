@@ -17,7 +17,7 @@ FONT = "Helvetica Neue, Helvetica, Arial, sans-serif"
 MONO = "Menlo, Consolas, monospace"
 LEDS = (("PWR", 1.5, "#18a848"), ("FAN", -2.5, "#e8b400"), ("Y1", -6.5, "#1f5fd8"), ("Y2", -10.5, "#1f5fd8"),
         ("W1", -14.5, "#d8261c"), ("W2", -18.5, "#d8261c"))
-QR_SIZE, QR_LEFT, QR_TOP = 11.5, -26.5, -4.8     # 1.3 mm or more of white on every side: the code's quiet zone
+QR_SIZE, QR_LEFT, QR_TOP = 11.5, -25.0, -4.8     # 1.3 mm or more of white on every side: the code's quiet zone
 BT, BP = -24.75, -27.15            # bottom legends' baselines: plug name, pin letters and arrow 0.8 mm apart
 
 def X(x): return x + HW
