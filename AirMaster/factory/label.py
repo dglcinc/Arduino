@@ -12,7 +12,7 @@ import segno
 CHROME = os.environ.get("AIRMASTER_CHROME", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 HW, HH = 28.0, 29.5                # label half width and height
 SY, NH, NX = 7.33, 3.7, 21.3       # screw height, notch half height, notch inner x
-INK, GREY = "#111111", "#777777"
+INK, GREY, BLUE = "#111111", "#777777", "#5aa9e6"
 FONT = "Helvetica Neue, Helvetica, Arial, sans-serif"
 MONO = "Menlo, Consolas, monospace"
 LEDS = (("PWR", 1.5, "#18a848"), ("FAN", -2.5, "#e8b400"), ("Y1", -6.5, "#1f5fd8"), ("Y2", -10.5, "#1f5fd8"),
@@ -46,10 +46,10 @@ def outline():
          f"L {X(-HW):.2f} {Y(top):.2f}", f"L {X(-HW):.2f} {Y(HH - r):.2f}", f"A {r} {r} 0 0 1 {X(-HW + r):.2f} {Y(HH):.2f}", "Z"]
     return " ".join(p)
 
-def monogram(cx, cy, scale):
-    """hardware/dl-monogram.svg, ring and letters, without its white square."""
+def monogram(cx, cy, scale, fill="none"):
+    """hardware/dl-monogram.svg, ring and letters, without its white square; fill colours the disc inside the ring."""
     return (f'<g transform="translate({X(cx):.2f} {Y(cy):.2f}) scale({scale})" fill="{INK}">'
-            f'<circle r="4.425" fill="none" stroke="{INK}" stroke-width="0.35"/>'
+            f'<circle r="4.425" fill="{fill}" stroke="{INK}" stroke-width="0.35"/>'
             '<path d="M -2.35 1.01 L -2.35 -2.51 A 0.24 0.24 0 0 1 -2.11 -2.75 L -1.55 -2.75 A 2 2 0 0 1 -1.55 1.25 L -2.11 1.25 A 0.24 0.24 0 0 1 -2.35 1.01 Z M -1.55 -1.95 L -1.55 0.45 A 1.2 1.2 0 0 0 -1.55 -1.95 Z"/>'
             '<path d="M 0.8 -1.23 A 0.24 0.24 0 0 1 1.04 -1.47 L 1.36 -1.47 A 0.24 0.24 0 0 1 1.6 -1.23 L 1.6 1.59 A 0.14 0.14 0 0 0 1.74 1.73 L 2.793 1.73 A 0.24 0.24 0 0 1 3.033 1.97 L 3.033 2.29 A 0.24 0.24 0 0 1 2.793 2.53 L 1.04 2.53 A 0.24 0.24 0 0 1 0.8 2.29 Z"/></g>')
 
@@ -72,8 +72,8 @@ def art(serial, unit_id, password):
     ssid = "AirMaster-" + unit_id
     a = [f'<path d="{outline()}" fill="#ffffff"/>']
     # title block
-    a += [monogram(0, 15.03, 0.72), text(0, 6.53, "AirMaster", 5.6, "bold"), text(0, SY - NH, "for Unico SMART controller", 1.9)]
-    # the tagline's baseline on the bottom of the cover-screw notches (y SY - NH)
+    a += [monogram(0, 16.38, 0.83, BLUE), text(0, 6.53, "AirMaster", 5.6, "bold"), text(0, SY - NH, "for Unico SMART controller", 1.9)]
+    # the monogram centred between the R C line (22.2) and the title's cap height (10.6); the tagline's baseline on the bottom of the cover-screw notches (y SY - NH)
     # this unit: scan the code, or type what it says
     a.append(qr_svg(wifi_qr_text(ssid, password)))
     tx = QR_LEFT + QR_SIZE + 1.5
