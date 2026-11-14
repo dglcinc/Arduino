@@ -208,6 +208,9 @@ def flash_one(board, firmware, ledger, force_new, serial=None):
                 raise RuntimeError(serial + " is retired")
         elif have:
             row = next((r for r in rows if r["serial"] == have["serial"] and r["unit_id"] == have["unit_id"]), None)
+            if not row and any(r["serial"] == have["serial"] for r in rows):
+                raise RuntimeError("the board carries %s from an older ledger; this ledger's %s is another unit. "
+                                   "Re-flash with --new-identity." % (have["serial"], have["serial"]))
             if not row:                    # flashed from another ledger: known from here on
                 row = dict(have, flashed="", firmware_sha256="", board="")
                 rows.append(row)
