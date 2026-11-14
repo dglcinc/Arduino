@@ -42,10 +42,10 @@ The ledger, `~/.config/airmaster/units.csv`, and the PDFs hold every password. T
 
 1. Power the unit with the USB cable to the Unico plugged in.
 2. Scan the label's QR code, or join `AirMaster-XXXX` with the label's password. A setup page opens, or browse to `http://192.168.42.1`.
-3. Choose the home WiFi, name the unit and set an admin password.
+3. Choose the home WiFi and name the unit. The password on the label is also the password for changing settings; the Unit tab changes it.
 4. The unit restarts onto the home WiFi. Open `http://<name>.local`.
 
-If the join fails, the setup network returns within about a minute and its page gives the reason. If the unit loses its WiFi later, the setup network comes up until someone uses it or 10 minutes pass with nobody on it, then the unit tries again. For a forgotten admin password, power it off and on three times, within 30 seconds each, and join the setup network.
+If the join fails, the setup network returns within about a minute and its page gives the reason. If the unit loses its WiFi later, the setup network comes up until someone uses it or 10 minutes pass with nobody on it, then the unit tries again. For a forgotten password, power it off and on three times, within 30 seconds each, join the setup network and save: the password goes back to the one on the label.
 
 
 With more than one AirMaster on the network, each one's page lists the others in a menu under its name, and `http://airmaster.local/` always reaches one of them: the unit with the earliest serial takes that name, and if it goes off the network the next one takes it within a few minutes. Each unit also keeps its own name, such as `http://master-bedroom.local/`, while it does not hold `airmaster.local`.

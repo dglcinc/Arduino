@@ -70,7 +70,7 @@ function renderSetup(){
   const fresh=info.mode==="setup";
   if(info.error)main.append(msg(info.error,"bad"));
   if(info.mode==="fallback")main.append(msg("This AirMaster cannot reach its saved WiFi. It will try again by itself after 10 minutes with nobody connected here. Change the network below if it has changed."));
-  if(info.mode==="recovery")main.append(msg("Recovery. Set a new admin password or WiFi below. Leave a field blank to keep what is saved."));
+  if(info.mode==="recovery")main.append(msg("Recovery. Saving here sets the admin password back to the one on the label. Leave a field blank to keep what is saved."));
   const nets=$("select",{},$("option",{value:"",textContent:"Choose a network"}));
   for(const n of info.networks.slice().sort((a,b)=>b.rssi-a.rssi))nets.append($("option",{value:n.ssid,textContent:n.ssid+" ("+bars(n.rssi)+(n.open?", open":"")+")"}));
   nets.append($("option",{value:"\u0000other",textContent:"Other, type the name"}));
@@ -78,22 +78,19 @@ function renderSetup(){
   nets.addEventListener("change",()=>{other.hidden=nets.value!=="\u0000other"});
   const pass=$("input",{type:"password",autocomplete:"off",autocapitalize:"off"});
   const name=$("input",{value:info.name||"",placeholder:"Master Bedroom",maxLength:32});
-  const a1=$("input",{type:"password",autocomplete:"new-password"}),a2=$("input",{type:"password",autocomplete:"new-password"});
   const err=$("div");
   const go=$("button",{textContent:"Save and connect"});
   const form=$("section",{},$("h2",{textContent:fresh?"Connect this AirMaster to your WiFi":"WiFi"}),
     field("WiFi network",nets),other,field("WiFi password",pass),
-    $("h2",{textContent:"This unit"}),field("Name, such as the zone it serves",name),
-    field(fresh?"Admin password, 8 characters or more, needed to change settings":"New admin password",a1),field("Admin password again",a2),err,$("div",{class:"bar"},go));
+    $("h2",{textContent:"This unit"}),field("Name, such as the zone it serves",name),err,$("div",{class:"bar"},go));
   main.append(form);
   go.addEventListener("click",async()=>{
     err.replaceChildren();
     const ssid=nets.value==="\u0000other"?other.value.trim():nets.value;
     if(fresh&&!ssid){err.append(msg("Choose a WiFi network.","bad"));return}
-    if(a1.value!==a2.value){err.append(msg("The two admin passwords differ.","bad"));return}
     go.disabled=true;
     try{
-      const r=await post("/api/setup",{ssid,pass:pass.value,name:name.value,admin:a1.value});
+      const r=await post("/api/setup",{ssid,pass:pass.value,name:name.value});
       renderJoining(r.host,r.ap,!!ssid);
     }catch(e){err.append(msg(e.message,"bad"));go.disabled=false}
   });
@@ -159,7 +156,7 @@ function loginBox(after){
   const go=async()=>{err.replaceChildren();b.disabled=true;try{await post("/api/login",{password:pw.value});await refresh();after()}catch(e){err.append(msg(e.message,"bad"));b.disabled=false}};
   b.addEventListener("click",go);
   pw.addEventListener("keydown",e=>{if(e.key==="Enter")go()});
-  return $("section",{},$("h2",{textContent:"Log in to change settings"}),field("Admin password",pw),err,$("div",{class:"bar"},b));
+  return $("section",{},$("h2",{textContent:"Log in to change settings"}),field("Password, the one on the label unless you changed it",pw),err,$("div",{class:"bar"},b));
 }
 async function renderSettings(){
   clearTimer();
@@ -279,7 +276,7 @@ function renderUnit(){
     })}}))));
   // password
   const a1=$("input",{type:"password",autocomplete:"new-password"}),a2=$("input",{type:"password",autocomplete:"new-password"});
-  main.append($("section",{},$("h2",{textContent:"Admin password"}),field("New password, 8 characters or more",a1),field("Again",a2),$("div",{class:"bar"},
+  main.append($("section",{},$("h2",{textContent:"Admin password"}),$("p",{textContent:"The unit starts with the password on its label. Change it here if you want another."}),field("New password, 8 characters or more",a1),field("Again",a2),$("div",{class:"bar"},
     $("button",{textContent:"Change password",on:{click:()=>act(out,async()=>{if(a1.value!==a2.value)throw new Error("The two passwords differ.");await post("/api/unit",{admin:a1.value});a1.value=a2.value="";out.replaceChildren(msg("Password changed.","ok"))})}}))));
   // firmware
   const file=$("input",{type:"file",accept:".bin"}),prog=$("div",{class:"note"});

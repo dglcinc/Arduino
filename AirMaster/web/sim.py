@@ -8,6 +8,7 @@ import http.server, json, os, secrets, sys, time, urllib.parse
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODE = sys.argv[1] if len(sys.argv) > 1 else "normal"
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8765
+LABEL_PASS = "labelpw8"           # the setup password on the simulated label, which logs in until another is set
 M = ("G", "Y1", "Y2", "W1", "W2", "E")
 S = {"cfm": dict(zip(M, (300, 300, 600, 300, 600, 600))), "rpm": dict(zip(M, (900, 1200, 1800, 1200, 1800, 1800))),
      "air": {"percent": 0, "blower": 300, "sqft": 1500, "occupants": 4, "runmin": 20, "interval": 4, "bedrooms": 3, "eac": "off", "mode": "fixed"},
@@ -84,14 +85,14 @@ class H(http.server.BaseHTTPRequestHandler):
         if p == "/api/setup":
             if st["mode"] == "normal": return self.send(403, {"error": "setup is only open on the unit's own network"})
             if not f.get("ssid") and st["mode"] == "setup": return self.send(400, {"error": "Choose a WiFi network."})
-            if not f.get("admin") and not st["admin"]: return self.send(400, {"error": "Set an admin password."})
             if f.get("admin") and len(f["admin"]) < 8: return self.send(400, {"error": "The admin password needs at least 8 characters."})
             if f.get("name"): st["name"] = f["name"]
             if f.get("admin"): st["admin"] = f["admin"]
+            elif st["mode"] == "recovery": st["admin"] = ""
             st["log"].append("setup " + json.dumps({k: v for k, v in f.items() if "pass" not in k and k != "admin"}))
             return self.send(200, {"host": hostname(st["name"]), "ap": "AirMaster-4F2A", "ok": 1})
         if p == "/api/login":
-            if f.get("password") != st["admin"]: return self.send(401, {"error": "Wrong password."})
+            if f.get("password") != (st["admin"] or LABEL_PASS): return self.send(401, {"error": "Wrong password."})
             t = secrets.token_hex(16); st["sessions"].add(t)
             return self.send(200, {"ok": 1}, "s=%s; Path=/; Max-Age=43200; HttpOnly; SameSite=Strict" % t)
         if not self.logged(): return self.send(401, {"error": "Log in first."})

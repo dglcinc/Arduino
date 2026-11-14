@@ -30,7 +30,8 @@
 // per power-up, because each is a write to the SCB's memory, whose endurance is unknown.
 //
 // The web page is compiled in, compressed (web_page.h, from AirMaster/web). Viewing is open to the network. Changes need
-// the admin password, the login cookie and the page's X-AirMaster header. The page goes over plain HTTP.
+// the admin password (the label's setup password until the owner sets another), the login cookie and the page's X-AirMaster
+// header. The page goes over plain HTTP.
 //
 // The unit listens to the SCB until asked. Then ScbSetJob answers it just long enough to read or change its settings, in
 // the sequence scripts/unico-scb.py proved, and stops. It cannot send the thermostat override or the test bytes.
@@ -1073,12 +1074,14 @@ int postSetup(const char *form, char *body, size_t len, uint32_t now) {
   bool hasName = unit::formGet(form, "name", name, sizeof(name));
   bool hasAdmin = unit::formGet(form, "admin", admin, sizeof(admin)) && admin[0];
   if (!hasSsid && !cfg.hasWifi()) return jobError(body, len, 400, "Choose a WiFi network.");
-  if (!hasAdmin && !cfg.hasAdmin()) return jobError(body, len, 400, "Set an admin password.");
   if (hasAdmin && !validPassword(admin)) return jobError(body, len, 400, "The admin password needs at least 8 characters.");
   if (pass[0] && strlen(pass) < 8) return jobError(body, len, 400, "A WiFi password has at least 8 characters.");
   if (hasName && name[0]) strcpy(cfg.name, name);
   if (hasAdmin) {
     setAdminPassword(admin);
+    clearSessions();
+  } else if (mode == M_RECOVERY && cfg.hasAdmin()) {   // the owner forgot it: the label's password works again
+    cfg.salt[0] = cfg.hash[0] = 0;
     clearSessions();
   }
   if (!saveUnit()) return jobError(body, len, 500, "could not save");
@@ -1198,10 +1201,17 @@ int route(WiFiClient &c, const HttpRequest &r, char *form, char *body, size_t le
     if ((int32_t)(loginBlockedUntil - now) > 0) return jobError(body, len, 429, "Wait a moment and try again.");
     char pw[64] = "", hash[unit::HASH_HEX + 1];
     unit::formGet(form, "password", pw, sizeof(pw));
-    if (!cfg.hasAdmin()) return jobError(body, len, 401, "No admin password is set.");
+    // the password on the label until the owner sets another
+    if (!cfg.hasAdmin() && !identity.valid) return jobError(body, len, 401, "No admin password is set.");
     rp2040.wdt_reset();
-    unit::hashPassword(pw, cfg.salt, hash);
-    if (!unit::sameText(hash, cfg.hash)) {
+    bool good;
+    if (cfg.hasAdmin()) {
+      unit::hashPassword(pw, cfg.salt, hash);
+      good = unit::sameText(hash, cfg.hash);
+    } else {
+      good = unit::sameText(pw, identity.setupPass);
+    }
+    if (!good) {
       loginBlockedUntil = millis() + LOGIN_DELAY_MS;
       return jobError(body, len, 401, "Wrong password.");
     }
