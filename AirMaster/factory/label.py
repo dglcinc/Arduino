@@ -10,14 +10,14 @@ import os, subprocess, tempfile
 import segno
 
 CHROME = os.environ.get("AIRMASTER_CHROME", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
-HW, HH = 28.0, 29.5                # label half width and height
+HW, HH = 28.5, 30.0                # label half width and height: the base's flat face is +/-28.67 by +/-30.13
 SY, NH, NX = 7.33, 3.7, 21.3       # screw height, notch half height, notch inner x
 INK, GREY, BLUE = "#111111", "#777777", "#062d60"            # BLUE: JLCPCB blue mask, the mean of its order preview and a photo of the board
 FONT = "Helvetica Neue, Helvetica, Arial, sans-serif"
 MONO = "Menlo, Consolas, monospace"
 LEDS = (("PWR", 1.5, "#18a848"), ("FAN", -2.5, "#e8b400"), ("Y1", -6.5, "#1f5fd8"), ("Y2", -10.5, "#1f5fd8"),
         ("W1", -14.5, "#d8261c"), ("W2", -18.5, "#d8261c"))
-QR_SIZE, QR_LEFT, QR_TOP = 11.5, -25.0, -4.8     # 1.3 mm or more of white on every side: the code's quiet zone
+QR_SIZE, QR_LEFT, QR_TOP = 11.5, -25.0, -7.0     # 1.3 mm or more of white on every side: the code's quiet zone
 BT, BP = -24.75, -27.15            # bottom legends' baselines: plug name, pin letters and arrow 0.8 mm apart
 
 def X(x): return x + HW
@@ -80,11 +80,12 @@ def art(serial, unit_id, password):
     # this unit: scan the code, or type what it says
     a.append(qr_svg(wifi_qr_text(ssid, password)))
     tx = QR_LEFT + QR_SIZE + 1.5
-    a += [text(tx, -6.2, "To set up: scan QR or join WiFi", 1.8, anchor="start"),
-          text(tx, -8.8, esc(ssid), 2.5, "bold", "start"),
-          text(tx, -11.3, "Password", 1.8, anchor="start"),
-          text(tx, -13.9, esc(password), 2.5, "bold", "start", font=MONO),
-          text(tx, -16.4, "S/N " + esc(serial), 1.8, anchor="start", fill=GREY)]
+    a += [text(tx, -6.3, "To set up:", 2.1, anchor="start"),
+          text(tx, -8.9, "scan QR or join WiFi &#8595;", 2.1, anchor="start"),
+          text(tx, -12.0, esc(ssid), 2.8, "bold", "start"),
+          text(tx, -14.7, "Password", 2.1, anchor="start"),
+          text(tx, -17.6, esc(password), 2.8, "bold", "start", font=MONO),
+          text(tx, -20.2, "S/N " + esc(serial), 2.0, anchor="start", fill=GREY)]
     # top panel: 24 VAC with its true pin positions, the Pico's port, the Unico's USB
     a += [tri(-19.0, HH - 0.25, "up"), text(-19.0, 24.9, "24 VAC", 2.5, "bold"), text(-20.91, 22.2, "R", 2.2), text(-17.09, 22.2, "C", 2.2)]
     a += [tri(0, HH - 0.25, "up"), text(0, 24.9, "PROG", 2.5, "bold"), text(0, 22.2, "24 VAC off", 2.0)]

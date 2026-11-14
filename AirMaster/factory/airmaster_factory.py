@@ -192,15 +192,25 @@ class Board:
 
 # --- the commands -----------------------------------------------------------------------------------------
 
-def flash_one(board, firmware, ledger, force_new):
-    """Flashes the connected board. Returns its ledger row and whether it kept an identity; raises with the ledger unchanged."""
+def flash_one(board, firmware, ledger, force_new, serial=None):
+    """Flashes the connected board. Returns its ledger row and whether it kept an identity; raises with the ledger unchanged.
+    With serial, the board takes that ledger row's identity, which moves the serial to this board."""
     workdir = tempfile.mkdtemp(prefix="airmaster-")
     os.chmod(workdir, 0o700)
     try:
         rows = read_ledger(ledger)
-        have = None if force_new else parse_identity(board.read_page(workdir))
-        if have:
+        have = None if (force_new or serial) else parse_identity(board.read_page(workdir))
+        if serial:
+            row = next((r for r in rows if r["serial"] == serial), None)
+            if not row:
+                raise RuntimeError("not in the ledger: " + serial)
+            if row["flashed"] == "void":
+                raise RuntimeError(serial + " is retired")
+        elif have:
             row = next((r for r in rows if r["serial"] == have["serial"] and r["unit_id"] == have["unit_id"]), None)
+            if not row and any(r["serial"] == have["serial"] for r in rows):
+                raise RuntimeError("the board carries %s from an older ledger; this ledger's %s is another unit. "
+                                   "Re-flash with --new-identity." % (have["serial"], have["serial"]))
             if not row:                    # flashed from another ledger: known from here on
                 row = dict(have, flashed="", firmware_sha256="", board="")
                 rows.append(row)
@@ -251,13 +261,14 @@ def cmd_sheet(a):
 
 
 def cmd_retire(a):
-    """Void every unused label, so the next flash takes a label from a newer sheet. Destroy the voided labels."""
+    """Void every unused label, so the next flash takes a label from a newer sheet. Destroy the voided labels. With
+    --all, flashed units are voided too; re-flash each with --new-identity and give it a label from the new sheet."""
     rows = read_ledger(a.ledger)
-    gone = unused(rows)
+    gone = [r for r in rows if r["flashed"] != "void"] if a.all else unused(rows)
     for r in gone:
         r["flashed"] = "void"
     write_ledger(a.ledger, rows)
-    print("voided %d unused labels%s" % (len(gone), (", %s to %s" % (gone[0]["serial"], gone[-1]["serial"])) if gone else ""))
+    print("voided %d labels%s" % (len(gone), (", %s to %s" % (gone[0]["serial"], gone[-1]["serial"])) if gone else ""))
     return 0
 
 
@@ -274,7 +285,7 @@ def cmd_flash(a):
             print("no board in BOOTSEL after %d s; stopping." % a.wait)
             break
         try:
-            row, reused = flash_one(board, firmware, a.ledger, a.new_identity)
+            row, reused = flash_one(board, firmware, a.ledger, a.new_identity, a.serial)
         except (RuntimeError, ValueError, subprocess.CalledProcessError) as e:
             detail = e.stderr.strip() if isinstance(e, subprocess.CalledProcessError) and e.stderr else str(e)
             print("FAILED, and no label used: " + detail)
@@ -317,6 +328,7 @@ def main(argv=None):
     f.add_argument("--count", type=int, default=1)
     f.add_argument("--wait", type=int, default=180, help="seconds to wait for each board")
     f.add_argument("--new-identity", action="store_true", help="give the board the next unused label even if it has an identity; its old label stops working")
+    f.add_argument("--serial", help="give the board this unit's identity and label, as when a board is replaced; re-flash or retire the old board")
     f.set_defaults(func=cmd_flash)
     l = sub.add_parser("labels", help="print labels again, from the ledger")
     l.add_argument("serials", nargs="*", help="serial numbers; none means every unit")
@@ -324,6 +336,7 @@ def main(argv=None):
     l.add_argument("--printer")
     l.set_defaults(func=cmd_labels)
     r = sub.add_parser("retire", help="void every unused label; the next flash takes a label from a newer sheet")
+    r.add_argument("--all", action="store_true", help="void flashed units too")
     r.set_defaults(func=cmd_retire)
     s = sub.add_parser("list", help="list the units, without their passwords")
     s.set_defaults(func=cmd_list)
