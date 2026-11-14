@@ -72,8 +72,8 @@ def art(serial, unit_id, password):
     ssid = "AirMaster-" + unit_id
     a = [f'<path d="{outline()}" fill="#ffffff"/>']
     # title block
-    a += [monogram(0, 17.4, 0.72), text(0, 8.9, "AirMaster", 5.6, "bold"), text(0, 6.0, "for Unico SMART controller", 1.9)]
-    # all of it above the bottom of the cover-screw notches (y SY - NH)
+    a += [monogram(0, 15.03, 0.72), text(0, 6.53, "AirMaster", 5.6, "bold"), text(0, SY - NH, "for Unico SMART controller", 1.9)]
+    # the tagline's baseline on the bottom of the cover-screw notches (y SY - NH)
     # this unit: scan the code, or type what it says
     a.append(qr_svg(wifi_qr_text(ssid, password)))
     tx = QR_LEFT + QR_SIZE + 1.5
