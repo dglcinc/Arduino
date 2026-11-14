@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 # Copyright David Lewis
-"""One AirMaster's label, full size: the generic label from pivac hardware/label/gen-label.py with the title block moved up
-to make room for the unit's setup details and a QR code that joins its setup network. Every pointer and pin letter sits at
+"""One AirMaster's label, full size: the Rev C label from pivac hardware/label/gen-label.py (`revc`), with the title block
+centred and moved up to make room for the unit's setup details and a QR code that joins its setup network. The Rev C LEDs
+shine through holes in the base's floor under the right-hand cover screw, so that screw's notch runs on to the bottom
+edge and the LED names stand left of the slot. Every pointer and pin letter sits at
 its part's true position, as on the generic label. Coordinates are millimetres from the box's centre, seen from outside
 the base with the top panel up, y up. Needs segno for the QR code and Chrome for the PDF."""
 import os, subprocess, tempfile
@@ -10,12 +12,13 @@ import segno
 CHROME = os.environ.get("AIRMASTER_CHROME", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 HW, HH = 28.0, 29.5                # label half width and height
 SY, NH, NX = 7.33, 3.7, 21.3       # screw height, notch half height, notch inner x
-INK, GREY = "#111111", "#777777"
+INK, GREY, BLUE = "#111111", "#777777", "#062d60"            # BLUE: JLCPCB blue mask, the mean of its order preview and a photo of the board
 FONT = "Helvetica Neue, Helvetica, Arial, sans-serif"
 MONO = "Menlo, Consolas, monospace"
 LEDS = (("PWR", 1.5, "#18a848"), ("FAN", -2.5, "#e8b400"), ("Y1", -6.5, "#1f5fd8"), ("Y2", -10.5, "#1f5fd8"),
         ("W1", -14.5, "#d8261c"), ("W2", -18.5, "#d8261c"))
-QR_SIZE, QR_LEFT, QR_TOP = 13.5, -26.5, -7.3     # 1.3 mm or more of white on every side: the code's quiet zone
+QR_SIZE, QR_LEFT, QR_TOP = 11.5, -25.0, -4.8     # 1.3 mm or more of white on every side: the code's quiet zone
+BT, BP = -24.75, -27.15            # bottom legends' baselines: plug name, pin letters and arrow 0.8 mm apart
 
 def X(x): return x + HW
 def Y(y): return HH - y
@@ -37,17 +40,19 @@ def outline():
     top, bot = SY + NH, SY - NH
     p = [f"M {X(-HW + r):.2f} {Y(HH):.2f}", f"L {X(HW - r):.2f} {Y(HH):.2f}", f"A {r} {r} 0 0 1 {X(HW):.2f} {Y(HH - r):.2f}",
          f"L {X(HW):.2f} {Y(top):.2f}", f"L {X(NX + n):.2f} {Y(top):.2f}", f"A {n} {n} 0 0 0 {X(NX):.2f} {Y(top - n):.2f}",
-         f"L {X(NX):.2f} {Y(bot + n):.2f}", f"A {n} {n} 0 0 0 {X(NX + n):.2f} {Y(bot):.2f}", f"L {X(HW):.2f} {Y(bot):.2f}",
-         f"L {X(HW):.2f} {Y(-HH + r):.2f}", f"A {r} {r} 0 0 1 {X(HW - r):.2f} {Y(-HH):.2f}", f"L {X(-HW + r):.2f} {Y(-HH):.2f}",
+         f"L {X(NX):.2f} {Y(-HH + r):.2f}", f"A {r} {r} 0 0 1 {X(NX - r):.2f} {Y(-HH):.2f}", f"L {X(-HW + r):.2f} {Y(-HH):.2f}",
          f"A {r} {r} 0 0 1 {X(-HW):.2f} {Y(-HH + r):.2f}", f"L {X(-HW):.2f} {Y(bot):.2f}", f"L {X(-NX - n):.2f} {Y(bot):.2f}",
          f"A {n} {n} 0 0 0 {X(-NX):.2f} {Y(bot + n):.2f}", f"L {X(-NX):.2f} {Y(top - n):.2f}", f"A {n} {n} 0 0 0 {X(-NX - n):.2f} {Y(top):.2f}",
          f"L {X(-HW):.2f} {Y(top):.2f}", f"L {X(-HW):.2f} {Y(HH - r):.2f}", f"A {r} {r} 0 0 1 {X(-HW + r):.2f} {Y(HH):.2f}", "Z"]
     return " ".join(p)
 
-def monogram(cx, cy, scale):
-    """hardware/dl-monogram.svg, ring and letters, without its white square."""
-    return (f'<g transform="translate({X(cx):.2f} {Y(cy):.2f}) scale({scale})" fill="{INK}">'
-            f'<circle r="4.425" fill="none" stroke="{INK}" stroke-width="0.35"/>'
+def monogram(cx, cy, scale, fill="none", letters=INK, outer=None):
+    """hardware/dl-monogram.svg, ring and letters, without its white square, all in `letters`. With `fill`, the disc
+    behind them takes that colour, as the board's silkscreen sits on its mask; with `outer`, a ring of the same weight
+    in that colour closes round the monogram's own."""
+    return (f'<g transform="translate({X(cx):.2f} {Y(cy):.2f}) scale({scale})" fill="{letters}">'
+            + (f'<circle r="4.775" fill="{fill}" stroke="{outer}" stroke-width="0.35"/>' if outer else "")
+            + f'<circle r="4.425" fill="{"none" if outer else fill}" stroke="{letters}" stroke-width="0.35"/>'
             '<path d="M -2.35 1.01 L -2.35 -2.51 A 0.24 0.24 0 0 1 -2.11 -2.75 L -1.55 -2.75 A 2 2 0 0 1 -1.55 1.25 L -2.11 1.25 A 0.24 0.24 0 0 1 -2.35 1.01 Z M -1.55 -1.95 L -1.55 0.45 A 1.2 1.2 0 0 0 -1.55 -1.95 Z"/>'
             '<path d="M 0.8 -1.23 A 0.24 0.24 0 0 1 1.04 -1.47 L 1.36 -1.47 A 0.24 0.24 0 0 1 1.6 -1.23 L 1.6 1.59 A 0.14 0.14 0 0 0 1.74 1.73 L 2.793 1.73 A 0.24 0.24 0 0 1 3.033 1.97 L 3.033 2.29 A 0.24 0.24 0 0 1 2.793 2.53 L 1.04 2.53 A 0.24 0.24 0 0 1 0.8 2.29 Z"/></g>')
 
@@ -70,31 +75,33 @@ def art(serial, unit_id, password):
     ssid = "AirMaster-" + unit_id
     a = [f'<path d="{outline()}" fill="#ffffff"/>']
     # title block
-    a += [monogram(-5.5, 12.6, 1.25), text(-5.5, -2.0, "AirMaster", 7.6, "bold"), text(-5.5, -5.4, "for Unico SMART controller", 2.6)]
+    a += [monogram(0, 16.0, 0.846, BLUE, "#ffffff", BLUE), text(0, 6.53, "AirMaster", 5.6, "bold"), text(0, SY - NH, "for Unico SMART controller", 1.9)]
+    # the monogram 10 % up from its centred size, its top kept at 20.2 below the R C line; the tagline's baseline on the bottom of the cover-screw notches (y SY - NH)
     # this unit: scan the code, or type what it says
     a.append(qr_svg(wifi_qr_text(ssid, password)))
     tx = QR_LEFT + QR_SIZE + 1.5
-    a += [text(tx, -9.0, "To set up, scan, or join WiFi", 1.9, anchor="start"),
-          text(tx, -11.8, esc(ssid), 2.7, "bold", "start"),
-          text(tx, -14.4, "Password", 1.9, anchor="start"),
-          text(tx, -17.2, esc(password), 2.5, "bold", "start", font=MONO),
-          text(tx, -20.0, "S/N " + esc(serial), 1.9, anchor="start", fill=GREY)]
+    a += [text(tx, -6.2, "To set up: scan QR or join WiFi", 1.8, anchor="start"),
+          text(tx, -8.8, esc(ssid), 2.5, "bold", "start"),
+          text(tx, -11.3, "Password", 1.8, anchor="start"),
+          text(tx, -13.9, esc(password), 2.5, "bold", "start", font=MONO),
+          text(tx, -16.4, "S/N " + esc(serial), 1.8, anchor="start", fill=GREY)]
     # top panel: 24 VAC with its true pin positions, the Pico's port, the Unico's USB
     a += [tri(-19.0, HH - 0.25, "up"), text(-19.0, 24.9, "24 VAC", 2.5, "bold"), text(-20.91, 22.2, "R", 2.2), text(-17.09, 22.2, "C", 2.2)]
     a += [tri(0, HH - 0.25, "up"), text(0, 24.9, "PROG", 2.5, "bold"), text(0, 22.2, "24 VAC off", 2.0)]
     a += [tri(19.8, HH - 0.25, "up"), text(19.8, 24.9, "UNICO", 2.5, "bold"), text(19.8, 22.2, "USB", 2.2)]
     # bottom panel: sensor plugs, pin letters at the true 2.5 mm pitch
-    a += [tri(-20.0, -HH + 0.25, "down"), text(-20.0, -24.0, "AIR NTC", 2.5, "bold")]
+    a += [tri(-20.0, -HH + 0.25, "down"), text(-20.0, BT, "AIR NTC", 2.5, "bold")]
     for x, s in ((-23.75, "S"), (-21.25, "&#8211;"), (-18.75, "R"), (-16.25, "&#8211;")):
-        a.append(text(x, -26.6, s, 2.2))
-    a += [tri(18.9, -HH + 0.25, "down"), text(18.9, -24.0, "1-WIRE", 2.5, "bold")]
-    for x, s in ((16.4, "V"), (18.9, "D"), (21.4, "G")):
-        a.append(text(x, -26.6, s, 2.2))
-    # LEDs on the side wall
+        a.append(text(x, BP, s, 2.2))
+    # the slot takes the plug's G end, so the legend and its pin letters stand 1.5 mm left of true
+    a += [tri(18.9, -HH + 0.25, "down"), text(20.3, BT, "1-WIRE", 2.5, "bold", "end")]
+    for x, s in ((14.9, "V"), (17.4, "D"), (19.9, "G")):
+        a.append(text(x, BP, s, 2.2))
+    a.append(text(0, -27.6, "&#169; 2026 David Lewis", 1.5, fill=GREY))
+    # LEDs through the floor, in the slot, so the lit LED shows its own colour: a name and a pointer to its hole
     for name, y, col in LEDS:
-        a.append(tri(HW - 0.25, y, "right"))
-        a.append(f'<circle cx="{X(24.4):.2f}" cy="{Y(y):.2f}" r="1.05" fill="{col}"/>')
-        a.append(text(22.5, y - 0.8, name, 2.3, "bold", "end"))
+        a.append(tri(NX - 0.4, y, "right"))
+        a.append(text(19.0, y - 0.8, name, 2.3, "bold", "end"))
     return "\n".join(a)
 
 def svg(serial, unit_id, password, cut=True):
@@ -127,7 +134,7 @@ def sheet_pdf(units, path):
     spots = [(left + c * (w + gap_x), top + r * (h + gap_y)) for r in range(4) for c in range(3)]
     bar = ('<div style="position:absolute;left:18mm;top:257mm;font:8pt Helvetica,Arial,sans-serif">'
            '<div style="width:50mm;height:1.5mm;background:#111"></div>'
-           '<div style="margin-top:1mm">Print at 100 %: this bar must measure 50 mm. Cut on the grey line, including the side notches, which clear the cover screws.</div></div>')
+           '<div style="margin-top:1mm">Print at 100 %: this bar must measure 50 mm. Cut on the grey line, including the left notch and the right slot, which clear the cover screws and the LED holes.</div></div>')
     pages = []
     for i in range(0, len(units), 12):
         cells = "".join(f'<div style="position:absolute;left:{x}mm;top:{y}mm">{svg(u["serial"], u["unit_id"], u["password"])}</div>'

@@ -54,7 +54,8 @@ def parse_identity(p):
 
 
 def new_password():
-    return "-".join("".join(secrets.choice(ALPHABET) for _ in range(4)) for _ in range(3))
+    """Eight characters, WPA2's minimum: about 40 bits from the 31-letter alphabet, typed from the label."""
+    return "".join(secrets.choice(ALPHABET) for _ in range(8))
 
 
 # --- UF2 ----------------------------------------------------------------------------------------------
@@ -249,6 +250,17 @@ def cmd_sheet(a):
     return 0
 
 
+def cmd_retire(a):
+    """Void every unused label, so the next flash takes a label from a newer sheet. Destroy the voided labels."""
+    rows = read_ledger(a.ledger)
+    gone = unused(rows)
+    for r in gone:
+        r["flashed"] = "void"
+    write_ledger(a.ledger, rows)
+    print("voided %d unused labels%s" % (len(gone), (", %s to %s" % (gone[0]["serial"], gone[-1]["serial"])) if gone else ""))
+    return 0
+
+
 def cmd_flash(a):
     with open(a.uf2, "rb") as f:
         firmware = f.read()
@@ -311,6 +323,8 @@ def main(argv=None):
     l.add_argument("--print", dest="print_labels", action="store_true")
     l.add_argument("--printer")
     l.set_defaults(func=cmd_labels)
+    r = sub.add_parser("retire", help="void every unused label; the next flash takes a label from a newer sheet")
+    r.set_defaults(func=cmd_retire)
     s = sub.add_parser("list", help="list the units, without their passwords")
     s.set_defaults(func=cmd_list)
     a = ap.parse_args(argv)
