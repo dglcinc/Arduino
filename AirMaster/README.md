@@ -34,7 +34,7 @@ arduino-cli compile -b rp2040:rp2040:rpipicow:usbstack=tinyusb_host,flash=209715
 | No unused labels | The tool stops and asks for a new sheet |
 | Label damaged | `labels AM-0005` prints it again |
 
-`list` shows every unit without its password.
+`list` shows every unit without its password. A setup password is eight lowercase letters and digits, without 0, 1, i, l or o. `retire` voids every unused label in the ledger, so the next flash takes one from a newer sheet; destroy the voided labels.
 
 The ledger, `~/.config/airmaster/units.csv`, and the PDFs hold every password. They stay outside this repo and readable only by you. Back up the ledger.
 
