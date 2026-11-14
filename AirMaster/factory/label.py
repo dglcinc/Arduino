@@ -80,7 +80,7 @@ def art(serial, unit_id, password):
     # this unit: scan the code, or type what it says
     a.append(qr_svg(wifi_qr_text(ssid, password)))
     tx = QR_LEFT + QR_SIZE + 1.5
-    a += [text(tx, -6.2, "To set up, scan, or join WiFi", 1.8, anchor="start"),
+    a += [text(tx, -6.2, "To set up: scan QR or join WiFi", 1.8, anchor="start"),
           text(tx, -8.8, esc(ssid), 2.5, "bold", "start"),
           text(tx, -11.3, "Password", 1.8, anchor="start"),
           text(tx, -13.9, esc(password), 2.5, "bold", "start", font=MONO),
