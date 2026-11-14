@@ -9,6 +9,7 @@
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
 header{background:var(--card);border-bottom:1px solid var(--line);padding:12px 16px}
 h1{font-size:19px;margin:0}header small{color:var(--dim)}
+#units{margin:8px 0 0;min-height:38px;padding:6px 8px}
 nav{display:flex;gap:4px;margin-top:10px}
 nav button{flex:1;background:none;border:0;border-bottom:3px solid transparent;color:var(--dim);padding:8px 4px;font:inherit;border-radius:0;min-height:44px}
 nav button.on{color:var(--acc);border-color:var(--acc);font-weight:600}
@@ -39,6 +40,7 @@ code{font-size:13px;word-break:break-all}
 [hidden]{display:none!important}
 </style></head><body>
 <header><h1 id="title">AirMaster</h1><small id="sub"></small>
+<select id="units" hidden aria-label="Other AirMasters"></select>
 <nav id="nav" hidden><button data-t="status" class="on">Status</button><button data-t="settings">Settings</button><button data-t="unit">Unit</button></nav></header>
 <main id="main"></main>
 <script>
@@ -306,6 +308,17 @@ async function refresh(){
   document.getElementById("title").textContent=info.name?info.name:"AirMaster";
   document.getElementById("sub").textContent=info.name?"AirMaster":"for Unico SMART controller";
 }
+// every AirMaster this one hears; the one with the earliest serial also answers at airmaster.local
+async function listUnits(){
+  let r;try{r=await get("/api/units")}catch(e){return}
+  const us=(r.units||[]).filter(u=>u.ip);
+  const box=document.getElementById("units");
+  if(us.length<2){box.hidden=true;return}
+  us.sort((a,b)=>(a.name||a.serial).localeCompare(b.name||b.serial));
+  box.replaceChildren(...us.map(u=>$("option",{value:u.self?"":"http://"+u.ip+"/",textContent:(u.name||u.host||u.ip)+(u.serial?" \u00b7 "+u.serial:"")+(u.leads?" \u00b7 "+r.lead+".local":""),selected:!!u.self})));
+  box.hidden=false;
+}
+document.getElementById("units").addEventListener("change",e=>{if(e.target.value)location.href=e.target.value});
 document.getElementById("nav").addEventListener("click",e=>{if(e.target.dataset.t){tab=e.target.dataset.t;show()}});
 (async()=>{
   try{await refresh()}catch(e){main.replaceChildren(msg("Cannot reach the AirMaster. Reload to try again.","bad"));return}
@@ -316,5 +329,6 @@ document.getElementById("nav").addEventListener("click",e=>{if(e.target.dataset.
   }
   document.getElementById("nav").hidden=false;
   show();
+  listUnits();setInterval(listUnits,60000);
 })();
 </script></body></html>

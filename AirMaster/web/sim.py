@@ -61,6 +61,11 @@ class H(http.server.BaseHTTPRequestHandler):
             o = {"job": "working" if busy else "idle", "result": "working" if busy else st["result"], "backup": 1 if st["backup"] else 0}
             if st["backup"] is not None: o.update(snapshot())
             return self.send(200, o)
+        if p == "/api/units":
+            return self.send(200, {"lead": "airmaster", "units": [
+                {"serial": "AM-0001", "name": st["name"], "host": hostname(st["name"]), "ip": "10.0.0.50", "leads": 1, "self": 1},
+                {"serial": "AM-0002", "name": "Utility", "host": "utility", "ip": "10.0.0.51", "leads": 0, "self": 0},
+                {"serial": "AM-0003", "name": "Kids Room", "host": "kids-room", "ip": "10.0.0.52", "leads": 0, "self": 0}]})
         if p == "/api/info":
             setup = st["mode"] != "normal"
             nets = [{"ssid": "redux-test", "rssi": -48, "open": 0}, {"ssid": "Neighbor's \"Net\" <b>x</b>", "rssi": -80, "open": 0}, {"ssid": "CoffeeOpen", "rssi": -70, "open": 1}] if setup else []

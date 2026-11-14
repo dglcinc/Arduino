@@ -79,7 +79,7 @@
 #include "MqttDiscovery.h"
 #include "web_page.h"
 
-#define FW_VERSION "1.1.0"
+#define FW_VERSION "1.2.0"
 #define LOG_PORT 5515
 #ifndef ROM_WSUP
 #define ROM_WSUP { 0, 0, 0, 0, 0, 0, 0, 0 }
@@ -166,6 +166,17 @@ unit::Identity   identity;
 unit::UnitConfig cfg;
 Mode     mode = M_NORMAL;
 char     hostLabel[48] = "";
+// the other units on the network, and whether this one holds airmaster.local (UnitCore.h, other units)
+MDNSResponder::hMDNSService      amService = nullptr;
+MDNSResponder::hMDNSServiceQuery amQuery = nullptr;
+const int      MAX_PEERS = 16;
+const uint32_t ELECT_EVERY_MS = 20000, ELECT_SETTLE_MS = 45000;   // the settle lets the first answers arrive
+unit::Peer     peers[MAX_PEERS];
+int            nPeers = 0;
+bool           leading = false;
+volatile bool  leadRefused = false;
+uint32_t       announcedAt = 0, lastElection = 0;
+void announceUnit();
 char     apSsid[32] = "";
 char     lastError[80] = "";
 bool     fsOk = false, backupSaved = false, bootsCleared = false;
@@ -587,7 +598,10 @@ void startNetwork(bool powerOn) {
   if (WiFi.status() == WL_CONNECTED) {
     mode = M_NORMAL;
     server.begin();
-    if (MDNS.begin(hostLabel)) MDNS.addService("http", "tcp", 80);
+    if (MDNS.begin(hostLabel)) {
+      MDNS.addService("http", "tcp", 80);
+      announceUnit();
+    }
     Log.printf("boot: %s %s, %s, reboots %lu, stalls %lu\n", hostLabel, WiFi.localIP().toString().c_str(), identity.valid ? identity.serial : "no identity",
                (unsigned long)SCRATCH_TOTAL, (unsigned long)SCRATCH_STALLS);
   } else if (identity.valid) {
@@ -598,6 +612,69 @@ void startNetwork(bool powerOn) {
   } else {
     mode = M_NO_ID;
     Log.println("no factory identity and no WiFi: run AirMaster/factory on this board");
+  }
+}
+
+// --- other units ----------------------------------------------------------------------------------------------------
+
+void announceUnit() {
+  amService = MDNS.addService(nullptr, "airmaster", "tcp", 80);
+  if (amService) {
+    char name[40];
+    unit::announceText(cfg.name, name, sizeof(name));
+    MDNS.addServiceTxt(amService, "serial", identity.serial);
+    MDNS.addServiceTxt(amService, "name", name);
+    MDNS.addServiceTxt(amService, "host", hostLabel);
+  }
+  // another unit already answers on the name this one probed for
+  MDNS.setHostProbeResultCallback([](const char *, bool ok) { if (!ok && leading) leadRefused = true; });
+  amQuery = MDNS.installServiceQuery("airmaster", "tcp",
+                                     [](const MDNSResponder::MDNSServiceInfo &, MDNSResponder::AnswerType, bool) {});
+  announcedAt = millis();
+}
+
+// The units heard now. A unit's service records last 75 minutes but its address 2, so only a unit with an address counts:
+// one that lost power drops out within a few minutes.
+void collectPeers() {
+  nPeers = 0;
+  if (!amQuery) return;
+  IPAddress me = WiFi.localIP();
+  uint32_t n = MDNS.answerCount(amQuery);
+  for (uint32_t i = 0; i < n && nPeers < MAX_PEERS; i++) {
+    if (!MDNS.hasAnswerIP4Address(amQuery, i) || !MDNS.answerIP4AddressCount(amQuery, i)) continue;
+    IPAddress a = MDNS.answerIP4Address(amQuery, i, 0);
+    if (a == me) continue;
+    unit::Peer p;
+    for (int k = 0; k < 4; k++) p.ip[k] = a[k];
+    if (MDNS.hasAnswerTxts(amQuery, i)) unit::parseTxt(MDNS.answerTxts(amQuery, i), p);
+    if (MDNS.hasAnswerHostDomain(amQuery, i)) unit::firstLabel(MDNS.answerHostDomain(amQuery, i), p.answering, sizeof(p.answering));
+    if (identity.serial[0] && !strcmp(p.serial, identity.serial)) continue;
+    bool dup = false;
+    for (int j = 0; j < nPeers; j++) dup = dup || !memcmp(peers[j].ip, p.ip, 4);
+    if (!dup) peers[nPeers++] = p;
+  }
+}
+
+// Takes airmaster.local while no unit with an earlier serial is heard, and gives it back when one is.
+void electLeader(uint32_t now) {
+  if (!amQuery || now - lastElection < ELECT_EVERY_MS) return;
+  lastElection = now;
+  collectPeers();
+  if (leadRefused) {
+    leadRefused = false;
+    if (leading) {
+      leading = false;
+      MDNS.setHostname(hostLabel);
+      Log.println("airmaster.local: another unit answers on it");
+    }
+    return;
+  }
+  if (now - announcedAt < ELECT_SETTLE_MS) return;
+  bool lead = unit::shouldLead(identity.serial, peers, nPeers);
+  if (lead != leading) {
+    leading = lead;
+    MDNS.setHostname(lead ? unit::LEAD_HOST : hostLabel);
+    Log.printf("airmaster.local: %s, %d other units\n", lead ? "taken" : "given back", nPeers);
   }
 }
 
@@ -621,6 +698,7 @@ void serviceNetwork(uint32_t now) {
   switch (mode) {
     case M_NORMAL:
       MDNS.update();
+      electLeader(now);
       if (WiFi.status() == WL_CONNECTED) {
         wifiDown = false;
       } else if (!wifiDown) {
@@ -893,6 +971,27 @@ size_t apStr(char *b, size_t n, size_t len, const char *key, const char *val) {
   return ap(b, n, len, "\",");
 }
 
+void unitsJson(char *b, size_t len) {
+  size_t n = ap(b, 0, len, "{\"lead\":\"%s\",\"units\":[{", unit::LEAD_HOST);
+  n = apStr(b, n, len, "serial", identity.serial);
+  n = apStr(b, n, len, "name", cfg.name);
+  n = apStr(b, n, len, "host", hostLabel);
+  n = apStr(b, n, len, "ip", WiFi.localIP().toString().c_str());
+  n = ap(b, n, len, "\"leads\":%d,\"self\":1}", leading ? 1 : 0);
+  for (int i = 0; i < nPeers; i++) {
+    const unit::Peer &p = peers[i];
+    char ip[16];
+    snprintf(ip, sizeof(ip), "%u.%u.%u.%u", p.ip[0], p.ip[1], p.ip[2], p.ip[3]);
+    n = ap(b, n, len, ",{");
+    n = apStr(b, n, len, "serial", p.serial);
+    n = apStr(b, n, len, "name", p.name);
+    n = apStr(b, n, len, "host", p.host);
+    n = apStr(b, n, len, "ip", ip);
+    n = ap(b, n, len, "\"leads\":%d,\"self\":0}", strcmp(p.answering, unit::LEAD_HOST) ? 0 : 1);
+  }
+  ap(b, n, len, "]}");
+}
+
 void infoJson(char *b, size_t len, const HttpRequest &r, uint32_t now) {
   size_t n = ap(b, 0, len, "{");
   n = apStr(b, n, len, "mode", MODE_NAMES[mode]);
@@ -1087,6 +1186,7 @@ int route(WiFiClient &c, const HttpRequest &r, char *form, char *body, size_t le
     if (!strcmp(t, "/data") || (!strcmp(t, "/") && !r.wantsHtml)) { buildLine(body, len, now); return 200; }
     if (!strcmp(t, "/settings")) { settingsJson(body, len, now); return 200; }
     if (!strcmp(t, "/api/info")) { infoJson(body, len, r, now); return 200; }
+    if (!strcmp(t, "/api/units")) { unitsJson(body, len); return 200; }
     if (!strcmp(t, "/")) return 0;                 // the page
     return jobError(body, len, 404, "not found");
   }

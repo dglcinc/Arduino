@@ -47,6 +47,8 @@ The ledger, `~/.config/airmaster/units.csv`, and the PDFs hold every password. T
 
 If the join fails, the setup network returns within about a minute and its page gives the reason. If the unit loses its WiFi later, the setup network comes up until someone uses it or 10 minutes pass with nobody on it, then the unit tries again. For a forgotten admin password, power it off and on three times, within 30 seconds each, and join the setup network.
 
+
+With more than one AirMaster on the network, each one's page lists the others in a menu under its name, and `http://airmaster.local/` always reaches one of them: the unit with the earliest serial takes that name, and if it goes off the network the next one takes it within a few minutes. Each unit also keeps its own name, such as `http://master-bedroom.local/`, while it does not hold `airmaster.local`.
 ## Home Assistant
 
 On the Unit page, under Home Assistant (MQTT), give the broker's address, and a user name and password if it needs them. Each unit then appears in Home Assistant as a device, with its four temperatures, airflow, blower speed, WiFi signal and six thermostat calls.

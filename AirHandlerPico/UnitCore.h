@@ -221,6 +221,69 @@ inline void hostName(const char *name, const char *unitId, char *out, size_t out
   }
 }
 
+// --- other units on the network --------------------------------------------------------------------------------------
+// Every unit announces _airmaster._tcp with TXT serial, name and host (its own name's DNS label). The unit with the lowest
+// serial among those it hears also takes the host name LEAD_HOST, so http://airmaster.local/ always reaches one of them;
+// each page lists the rest.
+
+const char *const LEAD_HOST = "airmaster";
+
+struct Peer {
+  char serial[16] = "";
+  char name[33] = "";
+  char host[48] = "";        // its own label, from TXT
+  char answering[48] = "";   // the host name it answers on now, the first label of the SRV target
+  uint8_t ip[4] = {0, 0, 0, 0};
+};
+
+// Reads "serial=AM-0001;name=Master Bedroom;host=master-bedroom" into p. A name holds no ';' (announceText drops them).
+inline void parseTxt(const char *txt, Peer &p) {
+  while (txt && *txt) {
+    const char *end = strchr(txt, ';');
+    size_t len = end ? (size_t)(end - txt) : strlen(txt);
+    const char *eq = (const char *)memchr(txt, '=', len);
+    if (eq) {
+      size_t kl = (size_t)(eq - txt), vl = len - kl - 1;
+      char *dst = nullptr; size_t cap = 0;
+      if (kl == 6 && !strncmp(txt, "serial", 6)) { dst = p.serial; cap = sizeof(p.serial); }
+      else if (kl == 4 && !strncmp(txt, "name", 4)) { dst = p.name; cap = sizeof(p.name); }
+      else if (kl == 4 && !strncmp(txt, "host", 4)) { dst = p.host; cap = sizeof(p.host); }
+      if (dst) { size_t n = vl < cap - 1 ? vl : cap - 1; memcpy(dst, eq + 1, n); dst[n] = 0; }
+    }
+    txt = end ? end + 1 : nullptr;
+  }
+}
+
+// A TXT value from a unit's name: ';' would split the TXT string apart, so it becomes ','.
+inline void announceText(const char *in, char *out, size_t outLen) {
+  size_t n = 0;
+  for (; *in && n + 1 < outLen; in++) out[n++] = *in == ';' ? ',' : *in;
+  out[n] = 0;
+}
+
+// The first label of a domain, "airmaster.local" -> "airmaster".
+inline void firstLabel(const char *domain, char *out, size_t outLen) {
+  size_t n = 0;
+  for (; domain && domain[n] && domain[n] != '.' && n + 1 < outLen; n++) out[n] = domain[n];
+  out[n] = 0;
+}
+
+// Whether a serial comes before another: an empty serial (a bench board) never does.
+inline bool serialBefore(const char *a, const char *b) {
+  if (!a[0]) return false;
+  if (!b[0]) return true;
+  return strcmp(a, b) < 0;
+}
+
+// Whether this unit should hold LEAD_HOST, given the other units it hears. It keeps or takes the name while no other unit
+// with an earlier serial is heard; a unit with a later serial that answers on LEAD_HOST yields to it by the same rule.
+inline bool shouldLead(const char *selfSerial, const Peer *peers, int n) {
+  if (!selfSerial[0]) return false;
+  for (int i = 0; i < n; i++)
+    if (serialBefore(peers[i].serial, selfSerial)) return false;
+  return true;
+}
+
 // Appends s as the inside of a JSON string. Returns the new length, never past len - 1.
 inline size_t jsonStr(char *b, size_t n, size_t len, const char *s) {
   for (; *s && n + 7 < len; s++) {
