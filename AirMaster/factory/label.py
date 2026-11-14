@@ -17,7 +17,7 @@ FONT = "Helvetica Neue, Helvetica, Arial, sans-serif"
 MONO = "Menlo, Consolas, monospace"
 LEDS = (("PWR", 1.5, "#18a848"), ("FAN", -2.5, "#e8b400"), ("Y1", -6.5, "#1f5fd8"), ("Y2", -10.5, "#1f5fd8"),
         ("W1", -14.5, "#d8261c"), ("W2", -18.5, "#d8261c"))
-QR_SIZE, QR_LEFT, QR_TOP = 11.5, -26.5, -5.6     # 1.3 mm or more of white on every side: the code's quiet zone
+QR_SIZE, QR_LEFT, QR_TOP = 11.5, -26.5, -4.8     # 1.3 mm or more of white on every side: the code's quiet zone
 BT, BP = -24.75, -27.15            # bottom legends' baselines: plug name, pin letters and arrow 0.8 mm apart
 
 def X(x): return x + HW
@@ -72,15 +72,16 @@ def art(serial, unit_id, password):
     ssid = "AirMaster-" + unit_id
     a = [f'<path d="{outline()}" fill="#ffffff"/>']
     # title block
-    a += [monogram(0, 17.2, 0.9), text(0, 7.7, "AirMaster", 6.0, "bold"), text(0, 4.5, "for Unico SMART controller", 2.2)]
+    a += [monogram(0, 17.4, 0.72), text(0, 8.9, "AirMaster", 5.6, "bold"), text(0, 6.0, "for Unico SMART controller", 1.9)]
+    # all of it above the bottom of the cover-screw notches (y SY - NH)
     # this unit: scan the code, or type what it says
     a.append(qr_svg(wifi_qr_text(ssid, password)))
     tx = QR_LEFT + QR_SIZE + 1.5
-    a += [text(tx, -7.0, "To set up, scan, or join WiFi", 1.8, anchor="start"),
-          text(tx, -9.6, esc(ssid), 2.5, "bold", "start"),
-          text(tx, -12.1, "Password", 1.8, anchor="start"),
-          text(tx, -14.7, esc(password), 2.5, "bold", "start", font=MONO),
-          text(tx, -17.2, "S/N " + esc(serial), 1.8, anchor="start", fill=GREY)]
+    a += [text(tx, -6.2, "To set up, scan, or join WiFi", 1.8, anchor="start"),
+          text(tx, -8.8, esc(ssid), 2.5, "bold", "start"),
+          text(tx, -11.3, "Password", 1.8, anchor="start"),
+          text(tx, -13.9, esc(password), 2.5, "bold", "start", font=MONO),
+          text(tx, -16.4, "S/N " + esc(serial), 1.8, anchor="start", fill=GREY)]
     # top panel: 24 VAC with its true pin positions, the Pico's port, the Unico's USB
     a += [tri(-19.0, HH - 0.25, "up"), text(-19.0, 24.9, "24 VAC", 2.5, "bold"), text(-20.91, 22.2, "R", 2.2), text(-17.09, 22.2, "C", 2.2)]
     a += [tri(0, HH - 0.25, "up"), text(0, 24.9, "PROG", 2.5, "bold"), text(0, 22.2, "24 VAC off", 2.0)]
@@ -93,6 +94,7 @@ def art(serial, unit_id, password):
     a += [tri(18.9, -HH + 0.25, "down"), text(20.3, BT, "1-WIRE", 2.5, "bold", "end")]
     for x, s in ((14.9, "V"), (17.4, "D"), (19.9, "G")):
         a.append(text(x, BP, s, 2.2))
+    a.append(text(0, -27.6, "&#169; 2026 David Lewis", 1.5, fill=GREY))
     # LEDs through the floor, in the slot, so the lit LED shows its own colour: a name and a pointer to its hole
     for name, y, col in LEDS:
         a.append(tri(NX - 0.4, y, "right"))
