@@ -55,11 +55,11 @@ class H(http.server.BaseHTTPRequestHandler):
         if p in ("/", "/data"):
             t = time.time() - st["t0"]
             d = {"wsup": 49.81 + st["off"]["wsup"], "wret": 55.37 + st["off"]["wret"], "aret": 76.12 + st["off"]["aret"], "asup": 58.4 + st["off"]["asup"], "g": 1, "y1": 1, "y2": 0, "w1": 0, "w2": 0, "e": 0,
-                 "cfm": S["cfm"]["Y1"], "rpm": 1045, "flags": 32, "scb_age": .4, "y2_s": 4312, "cal": 1 if any(st["off"].values()) else 0, "rssi": -61, "uptime_ms": int(t * 1000) + 5000000, "reboots": 0}
+                 "cfm": S["cfm"]["Y1"], "rpm": 1045, "flags": 32, "scb_age": .4, "y2_s": 4312, "cal": 1 if any(st["off"].values()) else 0, "rssi": -61, "uptime_ms": int(t * 1000) + 5000000, "reboots": 1, "last_boot": "WiFi lost", "model": 2430}
             return self.send(200, d)
         if p == "/settings":
             busy = time.time() < st["job_done"]
-            o = {"job": "working" if busy else "idle", "result": "working" if busy else st["result"], "backup": 1 if st["backup"] else 0}
+            o = {"job": "working" if busy else "idle", "result": "working" if busy else st["result"], "backup": 1 if st["backup"] else 0, "model": 2430}
             if st["backup"] is not None: o.update(snapshot())
             return self.send(200, o)
         if p == "/api/units":

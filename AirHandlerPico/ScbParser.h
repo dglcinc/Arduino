@@ -16,6 +16,7 @@ struct ScbStatus {
   bool     hasAirflow = false;          // false until a 36-, 37- or 51-byte frame has arrived
   uint16_t stored[6] = {0};             // CFM for G Y1 Y2 W1 W2 E
   uint16_t actualCfm = 0, actualRpm = 0;
+  uint16_t model = 0;                   // the unit type: 1218, 2430, 3036, 3642 or 4860
 };
 
 class ScbParser {
@@ -61,6 +62,8 @@ class ScbParser {
 
   uint8_t buf[1024];
   size_t  nBuf = 0;
+  uint8_t lastChassis = 0xFF;
+  bool    is3036 = false;
 
   static uint16_t u16(const uint8_t *f, size_t i) { return (uint16_t(f[i]) << 8) | f[i + 1]; }
 
@@ -75,6 +78,13 @@ class ScbParser {
     status.w1 = !(calls & 0x04);
     status.w2 = !(calls & 0x02);
     status.e  = !(calls & 0x01);
+    // Byte 4 bits 0-1 are the chassis. Only a 51-byte frame tells a 3036 from its chassis (pivac
+    // docs/unico-scb-protocol.md 6.2, the same test as scb::cfmCap), so that answer is kept until the chassis changes.
+    static const uint16_t MODELS[4] = {1218, 2430, 3642, 4860};
+    uint8_t chassis = f[4] & 3;
+    if (chassis != lastChassis) { lastChassis = chassis; is3036 = false; }
+    if (len == 51) is3036 = f[5] == 12 && (u16(f, 38) & 0x0400);
+    status.model = is3036 ? 3036 : MODELS[chassis];
     nStatus++;
     if (len == 9) {                      // calls and firmware only
       if (onStatus) onStatus(status);

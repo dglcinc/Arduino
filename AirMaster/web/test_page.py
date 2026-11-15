@@ -80,6 +80,8 @@ try:
         ok(len(names) == 3 and "airmaster.local" in names[1] and p.locator("#units").input_value() == "", "the unit menu lists every unit, this one chosen")
         body = p.locator("main").inner_text()
         ok("49.8 °F" in body and "5.6 °F" in body and "not calibrated" in body, "temperatures, coil difference and the calibration warning")
+        ok("2430" in body and "Unit type" in body, "the status shows the unit type")
+        ok("since a restart (WiFi lost)" in body and "Restarts since power on: 1" in body, "the status says why it last restarted")
         p.screenshot(path=SHOTS + "/status.png", full_page=True)
 
         # settings: login, limits, change, restore
@@ -92,6 +94,7 @@ try:
         g = p.locator("tbody input").first
         ok(g.input_value() == "300", "settings read from the board")
         ok("750 CFM" in p.locator("main").inner_text(), "the model's limit is shown")
+        ok("Unit type 2430" in p.locator("main").inner_text(), "the settings show the unit type")
         p.screenshot(path=SHOTS + "/settings.png", full_page=True)
         g.fill("9999"); sv.click(); p.locator(".msg.bad").wait_for(); ok("Fan only" in msg(p), "over the model's limit refused in the page")
         g.fill("300"); sv.click(); p.get_by_text("Nothing has changed").wait_for(); ok(True, "no change, nothing sent")

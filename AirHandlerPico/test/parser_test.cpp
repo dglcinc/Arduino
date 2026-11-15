@@ -7,7 +7,7 @@
 static void show(const ScbStatus &s) {
   printf("%d %d%d%d%d%d%d %d", s.flags, s.g, s.y1, s.y2, s.w1, s.w2, s.e, s.hasAirflow);
   for (int k = 0; k < 6; k++) printf(" %d", s.stored[k]);
-  printf(" %d %d\n", s.actualCfm, s.actualRpm);
+  printf(" %d %d %d\n", s.actualCfm, s.actualRpm, s.model);
 }
 int main() {
   static uint8_t data[1 << 20];

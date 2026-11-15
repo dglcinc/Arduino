@@ -118,7 +118,7 @@ async function renderStatus(){
   const warn=$("div"),foot=$("div",{class:"note"});
   main.replaceChildren(warn,
     $("section",{},$("h2",{textContent:"Thermostat calls"}),chips),
-    $("section",{},$("h2",{textContent:"Blower"}),$("div",{class:"grid"},tile("cfm","Airflow, CFM"),tile("rpm","Motor, RPM"))),
+    $("section",{},$("h2",{textContent:"Blower"}),$("div",{class:"grid"},tile("cfm","Airflow, CFM"),tile("rpm","Motor, RPM"),tile("model","Unit type"))),
     $("section",{},$("h2",{textContent:"Coil water"}),$("div",{class:"grid"},tile("wsup","Supply"),tile("wret","Return"),tile("wd","Return minus supply"))),
     $("section",{},$("h2",{textContent:"Air"}),$("div",{class:"grid"},tile("asup","Supply"),tile("aret","Return"),tile("ad","Return minus supply"))),
     foot);
@@ -126,13 +126,13 @@ async function renderStatus(){
     try{
       const d=await get("/data");
       for(const k in chipEls)chipEls[k].classList.toggle("on",d[k]===1);
-      s.cfm.textContent=d.cfm===undefined?"–":d.cfm;s.rpm.textContent=d.rpm===undefined?"–":d.rpm;
+      s.cfm.textContent=d.cfm===undefined?"–":d.cfm;s.rpm.textContent=d.rpm===undefined?"–":d.rpm;s.model.textContent=d.model||"–";
       s.wsup.textContent=fmtF(d.wsup);s.wret.textContent=fmtF(d.wret);s.wd.textContent=diff(d.wret,d.wsup);
       s.asup.textContent=fmtF(d.asup);s.aret.textContent=fmtF(d.aret);s.ad.textContent=diff(d.aret,d.asup);
       warn.replaceChildren();
       if(d.scb_age===undefined)warn.append(msg("No data from the Unico control board. Check the USB cable."));
       if(!d.cal)warn.append(msg("These temperatures are not calibrated, so they can read a degree or so off. Small differences between two of them may not be real."));
-      foot.textContent=(d.rssi!==undefined?"WiFi signal "+bars(d.rssi)+" ("+d.rssi+" dBm). ":"")+"Running for "+uptime(d.uptime_ms)+".";
+      foot.textContent=(d.rssi!==undefined?"WiFi signal "+bars(d.rssi)+" ("+d.rssi+" dBm). ":"")+"Running for "+uptime(d.uptime_ms)+(d.last_boot&&d.last_boot!=="power on"?", since a restart ("+d.last_boot+")":"")+"."+(d.reboots?" Restarts since power on: "+d.reboots+".":"");
     }catch(e){warn.replaceChildren(msg("Cannot reach the AirMaster. Retrying.","bad"))}
     if(tab==="status")timer=setTimeout(tick,3000);
   };
@@ -180,7 +180,7 @@ function draftForm(s,note){
   if(note)out.append(note);
   const save=$("button",{textContent:"Save changes"}),restore=$("button",{class:"q",textContent:"Restore original settings"}),st=$("div",{class:"note"});
   main.replaceChildren(out,
-    $("section",{},$("h2",{textContent:"Airflow"}),$("p",{class:"note",textContent:"This model allows up to "+s.cfm_max+" CFM, and an RPM limit from "+s.rpm_min+" to "+s.rpm_max+"."}),
+    $("section",{},$("h2",{textContent:"Airflow"}),$("p",{class:"note",textContent:(s.model?"Unit type "+s.model+". ":"")+"This model allows up to "+s.cfm_max+" CFM, and an RPM limit from "+s.rpm_min+" to "+s.rpm_max+"."}),
       $("table",{},$("thead",{},$("tr",{},$("th",{textContent:"Call"}),$("th",{textContent:"CFM"}),$("th",{textContent:"RPM limit"}))),rows)),
     $("section",{},$("h2",{textContent:"Air Cycle"}),
       $("div",{class:"row"},field("Mode",sel("air.mode",s.air.mode,[["fixed","Fixed"],["auto","Auto"]])),field("Fresh air, percent",num("air.percent",s.air.percent,0,255))),
