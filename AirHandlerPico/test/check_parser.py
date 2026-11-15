@@ -22,6 +22,9 @@ def status(n):
     for _ in range(14):
         v = R.randrange(100, 1800); body += [v >> 8, v & 255]
     body += [R.randrange(256) for _ in range(n - 2 - len(body))]
+    if n == 51 and R.random() < 0.5:         # a 3036: power level 12 and switch bit 0x0400
+        body[5] = 12
+        body[38] |= 0x04
     return proto.with_check(bytes(body))
 
 stream, want = bytearray(), []
@@ -42,6 +45,7 @@ for _ in range(4000):
 
 frames, tail = proto.split_frames(bytes(stream))
 air, stored, cfm, rpm = 0, [0] * 6, 0, 0
+chassis, is3036 = None, False                # the firmware keeps a 3036 seen in a 51-byte frame until the chassis changes
 for k, f in frames:
     if k != "status":
         continue
@@ -49,7 +53,12 @@ for k, f in frames:
     c = "".join("1" if m in d["calls"] else "0" for m in proto.MODES)
     if "actual_cfm" in d:
         air = 1; stored = [d["cfm"][m] for m in proto.MODES]; cfm, rpm = d["actual_cfm"], d["actual_rpm"]
-    want.append("%d %s %d %s %d %d" % (d["flags"], c, air, " ".join(map(str, stored)), cfm, rpm))
+    if f[4] & 3 != chassis:
+        chassis, is3036 = f[4] & 3, False
+    if len(f) == 51:
+        is3036 = d["model"] == "3036"
+    model = "3036" if is3036 else proto.model_name(f[4], None, 0)
+    want.append("%d %s %d %s %d %d %s" % (d["flags"], c, air, " ".join(map(str, stored)), cfm, rpm, model))
 
 r = subprocess.run([sys.argv[1]], input=bytes(stream), capture_output=True)
 got = r.stdout.decode().splitlines()

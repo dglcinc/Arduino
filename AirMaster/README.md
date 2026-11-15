@@ -22,6 +22,8 @@ arduino-cli compile -b rp2040:rp2040:rpipicow:usbstack=tinyusb_host,flash=209715
 ~/.config/airmaster/venv/bin/python AirMaster/factory/airmaster_factory.py flash --uf2 build/AirMaster.ino.uf2 --count 5
 ```
 
+Build against Adafruit TinyUSB Library 3.7.4 (`arduino-cli lib install "Adafruit TinyUSB Library@3.7.4"`). A build with 3.7.7 mounts the Unico USB board and reads bytes from it, but no SCB frame ever parses.
+
 1. Unplug 24 VAC and the USB-A cable. The micro-USB port and the converter share pin 40, so a computer must never meet 24 VAC.
 2. Hold BOOTSEL, plug USB into the micro-USB port and let go.
 3. The tool loads the firmware with the next unused identity, reads it back and names the label, such as `Use label AM-0005`.

@@ -50,8 +50,11 @@
 // is left out, and every SCB field is left out once no status frame has arrived for 10 s. Temperatures include the
 // offsets saved on the unit, and cal is 1 when any are set, so pivac's own offsets stay zero for such a unit:
 //   {"wsup":49.81,"wret":55.37,"aret":76.12,"asup":58.40,"g":1,"y1":1,"y2":0,"w1":0,"w2":0,"e":0,"cfm":300,"rpm":1045,
-//    "cfm_g":300,"cfm_y1":300,"cfm_y2":600,"cfm_w1":300,"cfm_w2":600,"cfm_e":600,"flags":32,"scb_age":0.4,
-//    "y2_s":4312,"cal":1,"rssi":-61,"uptime_ms":123456,"reboots":0}
+//    "cfm_g":300,"cfm_y1":300,"cfm_y2":600,"cfm_w1":300,"cfm_w2":600,"cfm_e":600,"flags":32,"model":2430,"scb_age":0.4,
+//    "y2_s":4312,"cal":1,"rssi":-61,"uptime_ms":123456,"reboots":0,"last_boot":"power on"}
+// model is the unit type from the SCB's frame. reboots counts restarts since power-on, the firmware's own and the
+// watchdog's; last_boot says why this boot happened: power on, requested, WiFi lost, setup network idle,
+// SCB went silent, no SCB frame after boot, watchdog, or reset.
 
 #pragma once
 
@@ -80,7 +83,7 @@
 #include "MqttDiscovery.h"
 #include "web_page.h"
 
-#define FW_VERSION "1.2.0"
+#define FW_VERSION "1.2.1"
 #define LOG_PORT 5515
 #ifndef ROM_WSUP
 #define ROM_WSUP { 0, 0, 0, 0, 0, 0, 0, 0 }
@@ -98,9 +101,9 @@ const uint32_t WIFI_JOIN_MS    = 20000;
 const uint32_t WIFI_LOST_MS    = 60000;    // reboot: the boot path is the one that joins
 const uint32_t SCB_REPORT_MS   = 10000;    // pivac's stale_s: past this the line drops the SCB fields
 const uint32_t LED_STALE_MS    = 5000;     // the SCB's own 2 s gap every 14 s must not blink the LEDs
-const uint32_t SILENCE_MS      = 20000;    // mounted and silent: the stall a reboot cleared on the bench
+const uint32_t SILENCE_MS      = 20000;    // mounted and silent: send the line coding again
 const uint32_t FIRST_FRAME_MS  = 30000;
-const uint32_t MAX_BACKOFF_MS  = 600000;
+const uint32_t STALL_REBOOT_MS = 900000;   // 15 min of silence despite the line coding: one restart per power-up
 const uint32_t ADC_PERIOD_MS   = 1000;
 const uint32_t DS_PERIOD_MS    = 2000;
 const uint32_t RESCAN_MS       = 30000;
@@ -108,7 +111,6 @@ const uint32_t HTTP_TIMEOUT_MS = 2000;
 const uint32_t AP_IDLE_MS      = 600000;   // setup network with nobody on it, when there is a saved WiFi to retry
 const uint32_t BOOT_WINDOW_MS  = 30000;    // a power-up lasting less counts toward recovery
 const int      RECOVERY_BOOTS  = 3;
-const uint32_t SESSION_MS      = 43200000; // 12 h
 const uint32_t LOGIN_DELAY_MS  = 2000;     // after a wrong password
 const size_t   FORM_MAX        = 1500;
 const size_t   FIRMWARE_MAX    = 1044480;  // the sketch space with the 1 MB filesystem
@@ -122,9 +124,16 @@ const uint32_t STATS_MS        = 300000;
 // Survive a reboot and clear at power-on, in the watchdog's scratch registers
 const uint32_t SCRATCH_MAGIC = 0xA1B2C3D4;
 #define SCRATCH_TAG    watchdog_hw->scratch[0]
-#define SCRATCH_STALLS watchdog_hw->scratch[1]    // reboots since the last frame, for the back-off
+#define SCRATCH_STALLS watchdog_hw->scratch[1]    // stall restarts since the last frame, so a silent line restarts the unit once
 #define SCRATCH_TOTAL  watchdog_hw->scratch[2]    // reboots since power-on, on the node's line
-#define SCRATCH_POWER_ON watchdog_hw->scratch[3]  // this boot was a power-up, which counts toward recovery
+#define SCRATCH_BOOT   watchdog_hw->scratch[3]    // bit 0: this boot was a power-up, which counts toward recovery;
+                                                  // bits 8-15: why the firmware last rebooted (RebootWhy)
+// scratch[4] to [7] belong to the SDK's watchdog_reboot()
+
+enum RebootWhy : uint8_t { RB_RESET, RB_REQUESTED, RB_WIFI, RB_AP_IDLE, RB_SCB_SILENT, RB_SCB_NONE, RB_WATCHDOG, RB_POWER, RB_COUNT };
+const char *const REBOOT_TEXT[RB_COUNT] = {"reset", "requested", "WiFi lost", "setup network idle", "SCB went silent",
+                                           "no SCB frame after boot", "watchdog", "power on"};
+uint8_t lastBoot = RB_POWER;                      // why this boot happened, on the node's line and the page
 
 Adafruit_USBH_Host USBHost;
 Adafruit_USBH_CDC  SerialHost;
@@ -188,12 +197,12 @@ const int   MAX_NETWORKS = 16;
 SeenNetwork networks[MAX_NETWORKS];
 int         nNetworks = 0;
 
-struct LoginSession { char token[33]; uint32_t expires; };
-LoginSession sessions[4];
 
 // A frame for the SCB, handed to core 1, which runs the USB stack and so does the write
 uint8_t       txFrame[43];
 volatile bool txPending = false;
+volatile bool recodeUsb = false;               // core 0 asks core 1 to send the 4800 line coding again
+uint8_t       usbIdx = 0;
 
 void queueFrame(const uint8_t *f, size_t n) {
   if (txPending || n > sizeof(txFrame)) return;
@@ -228,20 +237,15 @@ class UdpLog : public Print {
 };
 UdpLog Log;
 
-// --- reboot, with a back-off so a dead SCB line cannot hold the sensors in a boot loop ------------
+// --- reboot ----------------------------------------------------------------------------------------
 
-void rebootNow(const char *why, bool stall) {
+void rebootNow(RebootWhy why, bool stall) {
   if (stall) SCRATCH_STALLS = SCRATCH_STALLS + 1;
   SCRATCH_TOTAL = SCRATCH_TOTAL + 1;
-  Log.printf("REBOOT: %s\n", why);
+  SCRATCH_BOOT = (SCRATCH_BOOT & 1) | ((uint32_t)why << 8);
+  Log.printf("REBOOT: %s\n", REBOOT_TEXT[why]);
   delay(200);
   rp2040.reboot();
-}
-
-uint32_t stallLimit(uint32_t base) {
-  uint32_t n = SCRATCH_STALLS, limit = base;
-  while (n-- && limit < MAX_BACKOFF_MS) limit *= 2;
-  return limit < MAX_BACKOFF_MS ? limit : MAX_BACKOFF_MS;
 }
 
 // --- sensors --------------------------------------------------------------------------------------
@@ -338,14 +342,23 @@ void serviceUsb(uint32_t now) {
   }
 }
 
-// A mounted device that goes quiet is the stall the bench saw. With nothing plugged in the node keeps running.
+// A mounted device that sends no frame is most often the USB board left at the 115200 baud TinyUSB sets on
+// enumeration, when the 4800 request from the mount callback was dropped: the bytes arrive and none parse. Core 1
+// sends the line coding again every SILENCE_MS while the silence lasts. Only a silence that outlasts STALL_REBOOT_MS
+// restarts the unit, once per power-up, so a dead line never takes the page and the sensors down with it.
 void watchSilence(uint32_t now) {
+  static uint32_t lastRecode = 0;
   if (!SerialHost.mounted()) return;
-  if (haveFrame) {
-    if (now - lastFrameMs > stallLimit(SILENCE_MS)) rebootNow("no status frame, device still mounted", true);
-  } else if (now > stallLimit(FIRST_FRAME_MS)) {
-    rebootNow("no status frame since boot, device mounted", true);
+  // serveClient() reads frames while a slow client talks, so lastFrameMs can be later than this loop's now
+  int32_t  since = (int32_t)(now - lastFrameMs);
+  uint32_t quiet = haveFrame ? (since > 0 ? (uint32_t)since : 0) : now;
+  if (quiet < (haveFrame ? SILENCE_MS : FIRST_FRAME_MS)) return;
+  if (now - lastRecode >= SILENCE_MS) {
+    lastRecode = now;
+    recodeUsb = true;
+    Log.printf("no status frame for %lu s: sending 4800 baud again\n", (unsigned long)(quiet / 1000));
   }
+  if (quiet > STALL_REBOOT_MS && SCRATCH_STALLS == 0) rebootNow(haveFrame ? RB_SCB_SILENT : RB_SCB_NONE, true);
 }
 
 void showLeds(uint32_t now) {
@@ -390,6 +403,7 @@ void buildLine(char *b, size_t len, uint32_t now) {
       for (int k = 0; k < 6; k++) n = addU(b, n, len, STORED[k], s.stored[k]);
     }
     n = addU(b, n, len, "flags", s.flags);
+    if (s.model) n = addU(b, n, len, "model", s.model);
     n = addF(b, n, len, "scb_age", (now - lastFrameMs) / 1000.0f);
   }
   n = addU(b, n, len, "y2_s", (y2TotalMs + (y2Active ? now - y2StartMs : 0)) / 1000);
@@ -397,11 +411,13 @@ void buildLine(char *b, size_t len, uint32_t now) {
   if (n < len && WiFi.status() == WL_CONNECTED) n += snprintf(b + n, len - n, ",\"rssi\":%ld", (long)WiFi.RSSI());
   n = addU(b, n, len, "uptime_ms", now);
   n = addU(b, n, len, "reboots", SCRATCH_TOTAL);
+  if (n < len) n += snprintf(b + n, len - n, ",\"last_boot\":\"%s\"", REBOOT_TEXT[lastBoot]);
   if (n < len) snprintf(b + n, len - n, "}");
 }
 
 void settingsJson(char *b, size_t len, uint32_t now) {
-  size_t n = snprintf(b, len, "{\"job\":\"%s\",\"result\":\"%s\",\"backup\":%d", job.busy() ? "working" : "idle", job.result, backupSaved ? 1 : 0);
+  size_t n = snprintf(b, len, "{\"job\":\"%s\",\"result\":\"%s\",\"backup\":%d,\"model\":%u", job.busy() ? "working" : "idle", job.result,
+                      backupSaved ? 1 : 0, haveFrame ? parser.status.model : 0);
   if (job.haveSettings && n < len) {
     const ScbSettings &s = job.settings;
     n += snprintf(b + n, len - n, ",\"age_s\":%lu,\"cfm_max\":%u,\"rpm_min\":%u,\"rpm_max\":%u,\"cfm\":{", (unsigned long)((now - job.settingsMs) / 1000),
@@ -603,8 +619,8 @@ void startNetwork(bool powerOn) {
       MDNS.addService("http", "tcp", 80);
       announceUnit();
     }
-    Log.printf("boot: %s %s, %s, reboots %lu, stalls %lu\n", hostLabel, WiFi.localIP().toString().c_str(), identity.valid ? identity.serial : "no identity",
-               (unsigned long)SCRATCH_TOTAL, (unsigned long)SCRATCH_STALLS);
+    Log.printf("boot: %s %s, %s, reboots %lu, stalls %lu, last %s\n", hostLabel, WiFi.localIP().toString().c_str(), identity.valid ? identity.serial : "no identity",
+               (unsigned long)SCRATCH_TOTAL, (unsigned long)SCRATCH_STALLS, REBOOT_TEXT[lastBoot]);
   } else if (identity.valid) {
     startSetupNetwork(cfg.hasWifi() ? M_FALLBACK : M_SETUP);
   } else if (cfg.hasWifi()) {
@@ -680,7 +696,7 @@ void electLeader(uint32_t now) {
 }
 
 void serviceNetwork(uint32_t now) {
-  if (rebootAt && (int32_t)(now - rebootAt) >= 0) rebootNow("requested", false);
+  if (rebootAt && (int32_t)(now - rebootAt) >= 0) rebootNow(RB_REQUESTED, false);
   if (!bootsCleared && now > BOOT_WINDOW_MS) {     // a power-up that lasted: the count starts again
     bootsCleared = true;
     if (fsOk) LittleFS.remove(BOOTS_FILE);
@@ -706,7 +722,7 @@ void serviceNetwork(uint32_t now) {
         wifiDown = true;
         wifiLostAt = now;
       } else if (now - wifiLostAt > WIFI_LOST_MS) {
-        rebootNow("WiFi lost", false);
+        rebootNow(RB_WIFI, false);
       }
       break;
     case M_SETUP:
@@ -716,7 +732,7 @@ void serviceNetwork(uint32_t now) {
     case M_RECOVERY:
       dns.processNextRequest();
       if (WiFi.softAPgetStationNum() > 0) apIdleSince = now;
-      else if (now - apIdleSince > AP_IDLE_MS) rebootNow("setup network idle", false);
+      else if (now - apIdleSince > AP_IDLE_MS) rebootNow(RB_AP_IDLE, false);
       break;
     case M_NO_ID:
       break;
@@ -887,30 +903,29 @@ void serviceMqtt(uint32_t now) {
 
 // --- login ----------------------------------------------------------------------------------------
 
-LoginSession *findSession(const char *token, uint32_t now) {
-  if (!token[0]) return nullptr;
-  for (LoginSession &s : sessions) {
-    if (s.token[0] && (int32_t)(s.expires - now) > 0 && unit::sameText(s.token, token)) return &s;
-  }
-  return nullptr;
+// The login cookie is derived from the saved password, so it survives a restart and a firmware update, and stops
+// working for every browser when the password changes or recovery puts the label's back. The browser keeps it 30 days.
+const char *sessionToken() {
+  static char tok[33];
+  uint8_t d[32];
+  unit::Sha256 h;
+  h.add("airmaster-session|", 18);
+  const char *secret = cfg.hasAdmin() ? cfg.hash : identity.setupPass;
+  h.add(secret, strlen(secret));
+  h.add(identity.serial, strlen(identity.serial));
+  h.finish(d);
+  unit::toHex(d, 16, tok);
+  return tok;
 }
 
-bool loggedIn(const HttpRequest &r, uint32_t now) { return findSession(r.session, now) != nullptr; }
-
-const char *newSession(uint32_t now) {
-  LoginSession *slot = &sessions[0];
-  for (LoginSession &s : sessions) {
-    if (!s.token[0] || (int32_t)(s.expires - now) <= 0) { slot = &s; break; }
-    if ((int32_t)(s.expires - slot->expires) < 0) slot = &s;     // full: the oldest gives way
-  }
-  randomHex(slot->token, 16);
-  slot->expires = now + SESSION_MS;
-  return slot->token;
+bool loggedIn(const HttpRequest &r, uint32_t now) {
+  (void)now;
+  if (!r.session[0] || (!cfg.hasAdmin() && !identity.valid)) return false;
+  return unit::sameText(r.session, sessionToken());
 }
 
-void clearSessions() {
-  for (LoginSession &s : sessions) s.token[0] = 0;
-}
+const char *SESSION_COOKIE = "Set-Cookie: s=%s; Path=/; Max-Age=2592000; HttpOnly; SameSite=Strict\r\n";
+bool adminChanged = false;                       // postUnit changed the password: hand the page its new cookie
 
 // --- answers --------------------------------------------------------------------------------------
 
@@ -1004,6 +1019,9 @@ void infoJson(char *b, size_t len, const HttpRequest &r, uint32_t now) {
   n = apStr(b, n, len, "ssid", WiFi.status() == WL_CONNECTED ? WiFi.SSID().c_str() : "");
   n = apStr(b, n, len, "ip", WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "");
   n = apStr(b, n, len, "error", lastError);
+  n = apStr(b, n, len, "last_boot", REBOOT_TEXT[lastBoot]);
+  n = ap(b, n, len, "\"reboots\":%lu,\"model\":%u,", (unsigned long)SCRATCH_TOTAL,
+         haveFrame && millis() - lastFrameMs < SCB_REPORT_MS ? parser.status.model : 0);
   n = ap(b, n, len, "\"admin\":%d,\"wifi\":%d,\"logged_in\":%d,\"cal\":%d,\"by_order\":%d,\"backup\":%d,", cfg.hasAdmin() ? 1 : 0, cfg.hasWifi() ? 1 : 0,
          loggedIn(r, now) ? 1 : 0, cfg.calibrated() ? 1 : 0, romsByIndex ? 1 : 0, backupSaved ? 1 : 0);
   n = apStr(b, n, len, "mqtt_host", cfg.mqttHost);
@@ -1079,10 +1097,8 @@ int postSetup(const char *form, char *body, size_t len, uint32_t now) {
   if (hasName && name[0]) strcpy(cfg.name, name);
   if (hasAdmin) {
     setAdminPassword(admin);
-    clearSessions();
   } else if (mode == M_RECOVERY && cfg.hasAdmin()) {   // the owner forgot it: the label's password works again
     cfg.salt[0] = cfg.hash[0] = 0;
-    clearSessions();
   }
   if (!saveUnit()) return jobError(body, len, 500, "could not save");
   if (hasSsid) {
@@ -1112,6 +1128,7 @@ int postUnit(const char *form, char *body, size_t len) {
   if (unit::formGet(form, "admin", v, sizeof(v)) && v[0]) {
     if (!validPassword(v)) return jobError(body, len, 400, "The admin password needs at least 8 characters.");
     setAdminPassword(v);
+    adminChanged = true;
   }
   char sup[20], ret[20];
   if (unit::formGet(form, "romsup", sup, sizeof(sup)) && unit::formGet(form, "romret", ret, sizeof(ret))) {
@@ -1215,20 +1232,28 @@ int route(WiFiClient &c, const HttpRequest &r, char *form, char *body, size_t le
       loginBlockedUntil = millis() + LOGIN_DELAY_MS;
       return jobError(body, len, 401, "Wrong password.");
     }
-    snprintf(cookie, sizeof(cookie), "Set-Cookie: s=%s; Path=/; Max-Age=43200; HttpOnly; SameSite=Strict\r\n", newSession(now));
+    snprintf(cookie, sizeof(cookie), SESSION_COOKIE, sessionToken());
     *extra = cookie;
     snprintf(body, len, "{\"ok\":1}");
     return 200;
   }
   if (!loggedIn(r, now)) return jobError(body, len, 401, "Log in first.");
 
-  if (!strcmp(t, "/api/logout")) {
-    LoginSession *s = findSession(r.session, now);
-    if (s) s->token[0] = 0;
+  if (!strcmp(t, "/api/logout")) {               // forgets the cookie in this browser
+    snprintf(cookie, sizeof(cookie), "Set-Cookie: s=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict\r\n");
+    *extra = cookie;
     snprintf(body, len, "{\"ok\":1}");
     return 200;
   }
-  if (!strcmp(t, "/api/unit")) return postUnit(form, body, len);
+  if (!strcmp(t, "/api/unit")) {
+    adminChanged = false;
+    int code = postUnit(form, body, len);
+    if (code == 200 && adminChanged) {
+      snprintf(cookie, sizeof(cookie), SESSION_COOKIE, sessionToken());
+      *extra = cookie;
+    }
+    return code;
+  }
   if (!strcmp(t, "/api/settings/read")) return startJob(nullptr, body, len, now);
   if (!strcmp(t, "/api/set")) {
     if (!backupSaved) return jobError(body, len, 409, "read_first");   // never a change before the originals are saved
@@ -1253,7 +1278,6 @@ int route(WiFiClient &c, const HttpRequest &r, char *form, char *body, size_t le
       LittleFS.remove(TRY_FILE);
       LittleFS.remove(BACKUP_FILE);
     }
-    clearSessions();
     rebootAt = now + 1000;
     snprintf(body, len, "{\"ok\":1}");
     return 200;
@@ -1327,8 +1351,16 @@ void setup() {
     SCRATCH_TAG = SCRATCH_MAGIC;
     SCRATCH_STALLS = 0;
     SCRATCH_TOTAL = 0;
-    SCRATCH_POWER_ON = 1;
+    SCRATCH_BOOT = 1;
+    lastBoot = RB_POWER;
+  } else if (rp2040.getResetReason() == RP2040::WDT_RESET) {   // a hang the watchdog caught
+    SCRATCH_TOTAL = SCRATCH_TOTAL + 1;
+    lastBoot = RB_WATCHDOG;
+  } else {
+    uint8_t why = (SCRATCH_BOOT >> 8) & 0xFF;
+    lastBoot = why < RB_COUNT ? why : RB_RESET;
   }
+  SCRATCH_BOOT &= 1;
   Serial1.begin(115200);
   for (uint8_t p : {PIN_Y1, PIN_Y2, PIN_W1, PIN_W2, PIN_FAN}) {
     pinMode(p, OUTPUT);
@@ -1342,8 +1374,8 @@ void setup() {
   Wire.setTimeout(25);
   Wire.begin();
 
-  bool powerOn = SCRATCH_POWER_ON;
-  SCRATCH_POWER_ON = 0;
+  bool powerOn = SCRATCH_BOOT & 1;
+  SCRATCH_BOOT = 0;
   startNetwork(powerOn);
 
   bool ds = bus.begin();
@@ -1394,7 +1426,18 @@ void setup1() {
 }
 
 void loop1() {
+  static uint32_t lastBaudCheck = 0;
   USBHost.task();
+  uint32_t t = millis();
+  if (SerialHost.mounted() && (recodeUsb || t - lastBaudCheck > 2000)) {
+    lastBaudCheck = t;
+    if (recodeUsb) {                           // the local copy can say 4800 while the board never took it
+      recodeUsb = false;
+      tuh_cdc_set_baudrate(usbIdx, SCB_BAUD, nullptr, 0);
+    } else if (SerialHost.baud() != SCB_BAUD) {
+      SerialHost.setBaudrate(SCB_BAUD);        // the request from the mount callback was refused or failed
+    }
+  }
   if (txPending) {                             // the frame goes out from the core that runs the USB stack
     if (SerialHost.mounted()) {
       SerialHost.write(txFrame, sizeof(txFrame));
@@ -1406,6 +1449,7 @@ void loop1() {
 
 extern "C" {
 void tuh_cdc_mount_cb(uint8_t idx) {
+  usbIdx = idx;
   SerialHost.mount(idx);
   mountEvent = true;
 }
