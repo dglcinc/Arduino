@@ -349,7 +349,9 @@ void serviceUsb(uint32_t now) {
 void watchSilence(uint32_t now) {
   static uint32_t lastRecode = 0;
   if (!SerialHost.mounted()) return;
-  uint32_t quiet = haveFrame ? now - lastFrameMs : now;
+  // serveClient() reads frames while a slow client talks, so lastFrameMs can be later than this loop's now
+  int32_t  since = (int32_t)(now - lastFrameMs);
+  uint32_t quiet = haveFrame ? (since > 0 ? (uint32_t)since : 0) : now;
   if (quiet < (haveFrame ? SILENCE_MS : FIRST_FRAME_MS)) return;
   if (now - lastRecode >= SILENCE_MS) {
     lastRecode = now;
