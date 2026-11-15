@@ -124,6 +124,27 @@ int main(int argc, char **argv) {
     hostName("!!!", "4F2A", h, sizeof(h));
     assert(!strcmp(h, "airmaster-4f2a"));
   }
+  { // other units: TXT, labels and the election
+    Peer p;
+    parseTxt("serial=AM-0002;name=Master Bedroom;host=master-bedroom;x=1", p);
+    assert(!strcmp(p.serial, "AM-0002") && !strcmp(p.name, "Master Bedroom") && !strcmp(p.host, "master-bedroom"));
+    Peer q;
+    parseTxt("name=An extremely long unit name that will not fit here", q);
+    assert(strlen(q.name) == sizeof(q.name) - 1 && !q.serial[0]);
+    char t[16];
+    announceText("a;b", t, sizeof(t));
+    assert(!strcmp(t, "a,b"));
+    firstLabel("airmaster.local", t, sizeof(t));
+    assert(!strcmp(t, "airmaster"));
+    Peer ps[2];
+    strcpy(ps[0].serial, "AM-0003");
+    strcpy(ps[1].serial, "");
+    assert(shouldLead("AM-0002", ps, 2));          // earliest serial heard
+    assert(!shouldLead("AM-0004", ps, 2));         // AM-0003 comes first
+    assert(shouldLead("AM-0004", ps + 1, 1));      // a bench board never wins
+    assert(!shouldLead("", ps, 0));                // nor leads alone
+    assert(shouldLead("AM-0001", ps, 0));          // a unit alone leads
+  }
   { // JSON escaping, and it stays inside the buffer
     char b[64];
     size_t n = jsonStr(b, 0, sizeof(b), "a\"b\\c\nd");
