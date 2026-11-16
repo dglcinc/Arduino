@@ -8,9 +8,9 @@ here = os.path.dirname(os.path.abspath(__file__))
 html = open(os.path.join(here, "index.html"), "rb").read()
 gz = gzip.compress(html, 9, mtime=0)
 out = os.path.join(here, "..", "..", "AirHandlerPico", "web_page.h")
-MANIFEST = ('{"name":"AirMaster","short_name":"AirMaster","start_url":"/","display":"browser","background_color":"#ffffff",'
-            '"theme_color":"#135ea8","icons":[{"src":"/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},'
-            '{"src":"/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}]}').encode()
+MANIFEST = ('{"name":"AirMaster","short_name":"AirMaster","start_url":".","display":"browser","background_color":"#ffffff",'
+            '"theme_color":"#135ea8","icons":[{"src":"icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},'
+            '{"src":"icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}]}').encode()
 
 
 def array(name, data):

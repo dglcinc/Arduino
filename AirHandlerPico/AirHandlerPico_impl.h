@@ -83,7 +83,7 @@
 #include "MqttDiscovery.h"
 #include "web_page.h"
 
-#define FW_VERSION "1.2.2"
+#define FW_VERSION "1.2.4"
 #define LOG_PORT 5515
 #ifndef ROM_WSUP
 #define ROM_WSUP { 0, 0, 0, 0, 0, 0, 0, 0 }
@@ -169,7 +169,7 @@ enum Mode { M_NORMAL, M_SETUP, M_FALLBACK, M_RECOVERY, M_NO_ID };
 const char *const MODE_NAMES[] = {"normal", "setup", "fallback", "recovery", "no-identity"};
 
 const char *const CONFIG_FILE = "/unit.cfg", *const TRY_FILE = "/wifi.try", *const BOOTS_FILE = "/boots",
-                  *const BACKUP_FILE = "/backup.txt";
+                  *const BACKUP_FILE = "/backup.txt", *const MODEL_FILE = "/is3036";
 extern "C" uint8_t _EEPROM_start;         // the flash's last sector; the factory's page is at its start
 
 unit::Identity   identity;
@@ -190,6 +190,7 @@ void announceUnit();
 char     apSsid[32] = "";
 char     lastError[80] = "";
 bool     fsOk = false, backupSaved = false, bootsCleared = false;
+bool     saved3036 = false, sawLongFrame = false;   // the 3036 answer on file, and a 51-byte frame waiting to be compared with it
 uint32_t apIdleSince = 0, rebootAt = 0, loginBlockedUntil = 0;
 
 struct SeenNetwork { char ssid[33]; int8_t rssi; bool open; };
@@ -322,6 +323,7 @@ void serviceAdc(uint32_t now) {
 void onFrame(uint32_t now) {
   lastFrameMs = now;
   haveFrame = true;
+  if (parser.lastLen == 51) sawLongFrame = true;
   SCRATCH_STALLS = 0;
   if (parser.status.y2 && !y2Active) y2StartMs = now;
   if (!parser.status.y2 && y2Active) y2TotalMs += now - y2StartMs;
@@ -570,6 +572,8 @@ void startNetwork(bool powerOn) {
   identity = unit::parseIdentity(&_EEPROM_start);
   loadUnit();
   backupSaved = fsOk && LittleFS.exists(BACKUP_FILE);
+  saved3036 = fsOk && LittleFS.exists(MODEL_FILE);
+  if (saved3036) parser.recall3036();          // the short frames cannot tell a 3036 from a 3642
 #ifndef HOSTNAME
 #define HOSTNAME ""
 #endif
@@ -700,6 +704,19 @@ void serviceNetwork(uint32_t now) {
   if (!bootsCleared && now > BOOT_WINDOW_MS) {     // a power-up that lasted: the count starts again
     bootsCleared = true;
     if (fsOk) LittleFS.remove(BOOTS_FILE);
+  }
+  if (sawLongFrame) {                              // only a 51-byte frame names a 3036, so its answer is kept on file
+    sawLongFrame = false;
+    bool is = parser.status.model == 3036;
+    if (is != saved3036 && fsOk) {
+      if (is) {
+        File f = LittleFS.open(MODEL_FILE, "w");
+        if (f) { f.write((uint8_t)1); f.close(); saved3036 = true; }
+      } else {
+        LittleFS.remove(MODEL_FILE);
+        saved3036 = false;
+      }
+    }
   }
   if (job.haveSettings && !backupSaved && fsOk) {  // the first time the unit sees them, before any change of its own
     static char form[420];
@@ -1215,7 +1232,7 @@ void receiveUpdate(WiFiClient &c, const HttpRequest &r, char *body, size_t len) 
 }
 
 int route(WiFiClient &c, const HttpRequest &r, char *form, char *body, size_t len, uint32_t now, const char **extra) {
-  static char cookie[100];
+  static char cookie[128];                     // the login cookie header is 100 characters, and needs its CR LF whole
   const char *t = r.target;
   bool get = !strcmp(r.method, "GET"), post = !strcmp(r.method, "POST");
   if (get) {
@@ -1293,6 +1310,7 @@ int route(WiFiClient &c, const HttpRequest &r, char *form, char *body, size_t le
       LittleFS.remove(CONFIG_FILE);
       LittleFS.remove(TRY_FILE);
       LittleFS.remove(BACKUP_FILE);
+      LittleFS.remove(MODEL_FILE);
     }
     rebootAt = now + 1000;
     snprintf(body, len, "{\"ok\":1}");
@@ -1347,6 +1365,8 @@ void serveClient() {
     if (!strcmp(r.method, "GET") && serveAsset(client, r.target)) {
     } else {
       int code = route(client, r, form, body, sizeof(body), now, &extra);
+      // Another unit's page reads this line for its tile. It is the same line any device on the network can read.
+      if (code == 200 && !strcmp(r.method, "GET") && !strcmp(r.target, "/data")) extra = "Access-Control-Allow-Origin: *\r\n";
       if (code == 0) servePage(client);
       else respond(client, code, body, extra);
     }

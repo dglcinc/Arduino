@@ -50,7 +50,11 @@ The ledger, `~/.config/airmaster/units.csv`, and the PDFs hold every password. T
 If the join fails, the setup network returns within about a minute and its page gives the reason. If the unit loses its WiFi later, the setup network comes up until someone uses it or 10 minutes pass with nobody on it, then the unit tries again. For a forgotten password, power it off and on three times, within 30 seconds each, join the setup network and save: the password goes back to the one on the label.
 
 
-With more than one AirMaster on the network, each one's page lists the others in a menu under its name, and `http://airmaster.local/` always reaches one of them: the unit with the earliest serial takes that name, and if it goes off the network the next one takes it within a few minutes. Each unit also keeps its own name, such as `http://master-bedroom.local/`, while it does not hold `airmaster.local`.
+With more than one AirMaster on the network, each one's page shows a tile for every unit under its name, with the unit's type, the call in force and the blower's airflow and speed, and a tap on a tile opens that unit. The tiles run across the top of a wide screen and stack on a phone. Each page reads the other units' `/data` lines for them, which every unit allows from another origin. Also,
+
+**Behind a reverse proxy.** The page asks only for relative addresses, so a proxy can serve each unit under a path named for its host, such as `/airmaster/master-bedroom/` and `/airmaster/great-room/`, with the trailing slash. Served that way the tiles link to the sibling paths, so the units must share one parent path and each path must end in the unit's host name. The proxy should send the unit only its own `s` cookie, rewrite that cookie's path to the unit's path, keep every request line under 400 characters, and put its own login in front, because the Settings tab changes the air handler. An nginx example is in pivac's `CLAUDE.md` under Remote Access.
+
+`http://airmaster.local/` always reaches one of them: the unit with the earliest serial takes that name, and if it goes off the network the next one takes it within a few minutes. Each unit also keeps its own name, such as `http://master-bedroom.local/`, while it does not hold `airmaster.local`.
 ## Home Assistant
 
 On the Unit page, under Home Assistant (MQTT), give the broker's address, and a user name and password if it needs them. Each unit then appears in Home Assistant as a device, with its four temperatures, airflow, blower speed, WiFi signal and six thermostat calls.
