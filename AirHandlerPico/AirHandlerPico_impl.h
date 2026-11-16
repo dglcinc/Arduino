@@ -83,7 +83,7 @@
 #include "MqttDiscovery.h"
 #include "web_page.h"
 
-#define FW_VERSION "1.2.1"
+#define FW_VERSION "1.2.2"
 #define LOG_PORT 5515
 #ifndef ROM_WSUP
 #define ROM_WSUP { 0, 0, 0, 0, 0, 0, 0, 0 }
@@ -950,22 +950,38 @@ void respond(WiFiClient &c, int code, const char *body, const char *extraHeader 
   c.println(body);
 }
 
-void servePage(WiFiClient &c) {
-  c.print("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Encoding: gzip\r\nCache-Control: no-cache\r\nConnection: close\r\n");
-  c.printf("Content-Length: %u\r\n\r\n", (unsigned)WEB_PAGE_GZ_LEN);
+// A compiled-in file, sent in pieces so the watchdog and the SCB's USB port are served through a slow client.
+void serveBlob(WiFiClient &c, const char *head, const uint8_t *data, size_t len) {
+  c.printf("HTTP/1.1 200 OK\r\n%sConnection: close\r\nContent-Length: %u\r\n\r\n", head, (unsigned)len);
   size_t sent = 0;
   uint32_t last = millis();
-  while (sent < WEB_PAGE_GZ_LEN && c.connected() && millis() - last < HTTP_TIMEOUT_MS) {
+  while (sent < len && c.connected() && millis() - last < HTTP_TIMEOUT_MS) {
     rp2040.wdt_reset();
     serviceUsb(millis());
-    size_t n = WEB_PAGE_GZ_LEN - sent;
+    size_t n = len - sent;
     if (n > 1024) n = 1024;
-    size_t w = c.write(WEB_PAGE_GZ + sent, n);
+    size_t w = c.write(data + sent, n);
     if (w) {
       sent += w;
       last = millis();
     }
   }
+}
+
+void servePage(WiFiClient &c) {
+  serveBlob(c, "Content-Type: text/html; charset=utf-8\r\nContent-Encoding: gzip\r\nCache-Control: no-cache\r\n", WEB_PAGE_GZ, WEB_PAGE_GZ_LEN);
+}
+
+// The home-screen icons and the web manifest that names them. A phone asks for these when the page is added to its
+// home screen: iOS for the apple-touch-icon, Android for the manifest and the sizes it lists.
+bool serveAsset(WiFiClient &c, const char *t) {
+  static const char PNG[] = "Content-Type: image/png\r\nCache-Control: max-age=86400\r\n";
+  if (!strcmp(t, "/apple-touch-icon.png") || !strcmp(t, "/apple-touch-icon-precomposed.png")) serveBlob(c, PNG, WEB_ICON_180, WEB_ICON_180_LEN);
+  else if (!strcmp(t, "/icon-192.png") || !strcmp(t, "/favicon.ico")) serveBlob(c, PNG, WEB_ICON_192, WEB_ICON_192_LEN);
+  else if (!strcmp(t, "/icon-512.png")) serveBlob(c, PNG, WEB_ICON_512, WEB_ICON_512_LEN);
+  else if (!strcmp(t, "/manifest.webmanifest")) serveBlob(c, "Content-Type: application/manifest+json\r\nCache-Control: max-age=86400\r\n", WEB_MANIFEST, WEB_MANIFEST_LEN);
+  else return false;
+  return true;
 }
 
 size_t ap(char *b, size_t n, size_t len, const char *fmt, ...);
@@ -1328,9 +1344,12 @@ void serveClient() {
     }
     form[n] = 0;
     const char *extra = "";
-    int code = route(client, r, form, body, sizeof(body), now, &extra);
-    if (code == 0) servePage(client);
-    else respond(client, code, body, extra);
+    if (!strcmp(r.method, "GET") && serveAsset(client, r.target)) {
+    } else {
+      int code = route(client, r, form, body, sizeof(body), now, &extra);
+      if (code == 0) servePage(client);
+      else respond(client, code, body, extra);
+    }
   }
   client.flush();
   client.stop();

@@ -68,4 +68,4 @@ The connection has no TLS. Topics are `airmaster/<id>/state`, `/status`, `/write
 | Factory flow, simulated board | `python3 AirMaster/factory/test_factory.py build/AirMaster.ino.uf2` |
 | The page in headless Chrome, against `web/sim.py` | `python3 AirMaster/web/test_page.py` (needs `playwright`) |
 
-After editing `web/index.html`, run `AirMaster/web/build_page.py`, which writes `AirHandlerPico/web_page.h`.
+After editing `web/index.html`, run `AirMaster/web/build_page.py`, which writes `AirHandlerPico/web_page.h`. The same header carries the home-screen icons and their web manifest: a phone that adds the page to its home screen shows the DL monogram, from `/apple-touch-icon.png` on iOS and from `/manifest.webmanifest` on Android. `web/gen_icon.py` (Pillow) draws `icon.svg` and the three PNGs; run it only when the icon changes, then run `build_page.py`.
