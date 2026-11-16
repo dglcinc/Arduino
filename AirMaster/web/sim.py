@@ -52,6 +52,10 @@ class H(http.server.BaseHTTPRequestHandler):
         if p == "/" and "text/html" in self.headers.get("Accept", ""):
             b = open(os.path.join(HERE, "index.html"), "rb").read()
             self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b); return
+        assets = {"/apple-touch-icon.png": "icon-180.png", "/icon-192.png": "icon-192.png", "/icon-512.png": "icon-512.png"}
+        if p in assets:
+            b = open(os.path.join(HERE, assets[p]), "rb").read()
+            self.send_response(200); self.send_header("Content-Type", "image/png"); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b); return
         if p in ("/", "/data"):
             t = time.time() - st["t0"]
             d = {"wsup": 49.81 + st["off"]["wsup"], "wret": 55.37 + st["off"]["wret"], "aret": 76.12 + st["off"]["aret"], "asup": 58.4 + st["off"]["asup"], "g": 1, "y1": 1, "y2": 0, "w1": 0, "w2": 0, "e": 0,
