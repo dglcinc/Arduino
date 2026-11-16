@@ -39,9 +39,10 @@ def apply(k, v):
     return True
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
-    def send(self, code, obj, cookie=None):
+    def send(self, code, obj, cookie=None, cors=False):
         b = json.dumps(obj).encode()
         self.send_response(code); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(b)))
+        if cors: self.send_header("Access-Control-Allow-Origin", "*")
         if cookie: self.send_header("Set-Cookie", cookie)
         self.end_headers(); self.wfile.write(b)
     def logged(self):
@@ -60,7 +61,10 @@ class H(http.server.BaseHTTPRequestHandler):
             t = time.time() - st["t0"]
             d = {"wsup": 49.81 + st["off"]["wsup"], "wret": 55.37 + st["off"]["wret"], "aret": 76.12 + st["off"]["aret"], "asup": 58.4 + st["off"]["asup"], "g": 1, "y1": 1, "y2": 0, "w1": 0, "w2": 0, "e": 0,
                  "cfm": S["cfm"]["Y1"], "rpm": 1045, "flags": 32, "scb_age": .4, "y2_s": 4312, "cal": 1 if any(st["off"].values()) else 0, "rssi": -61, "uptime_ms": int(t * 1000) + 5000000, "reboots": 1, "last_boot": "WiFi lost", "model": 2430}
-            return self.send(200, d)
+            # The two other units on the tiles are this simulator at other addresses: one idle, one heating on high.
+            if self.server.server_port != PORT: d.update(y1=0, w1=1, w2=1, cfm=S["cfm"]["W2"], rpm=1630, model=3036)
+            elif self.headers.get("Host", "").startswith("127.0.0.1"): d.update(g=0, y1=0, cfm=0, rpm=0)
+            return self.send(200, d, cors=p == "/data")
         if p == "/settings":
             busy = time.time() < st["job_done"]
             o = {"job": "working" if busy else "idle", "result": "working" if busy else st["result"], "backup": 1 if st["backup"] else 0, "model": 2430}
@@ -69,8 +73,8 @@ class H(http.server.BaseHTTPRequestHandler):
         if p == "/api/units":
             return self.send(200, {"lead": "airmaster", "units": [
                 {"serial": "AM-0001", "name": st["name"], "host": hostname(st["name"]), "ip": "10.0.0.50", "leads": 1, "self": 1},
-                {"serial": "AM-0002", "name": "Utility", "host": "utility", "ip": "10.0.0.51", "leads": 0, "self": 0},
-                {"serial": "AM-0003", "name": "Kids Room", "host": "kids-room", "ip": "10.0.0.52", "leads": 0, "self": 0}]})
+                {"serial": "AM-0002", "name": "Utility", "host": "utility", "ip": "127.0.0.1:%d" % PORT, "leads": 0, "self": 0},
+                {"serial": "AM-0003", "name": "Kids Room", "host": "kids-room", "ip": "127.0.0.1:%d" % (PORT + 100), "leads": 0, "self": 0}]})
         if p == "/api/info":
             setup = st["mode"] != "normal"
             nets = [{"ssid": "redux-test", "rssi": -48, "open": 0}, {"ssid": "Neighbor's \"Net\" <b>x</b>", "rssi": -80, "open": 0}, {"ssid": "CoffeeOpen", "rssi": -70, "open": 1}] if setup else []
@@ -136,4 +140,6 @@ def hostname(n):
     import re
     return re.sub(r"[^a-z0-9]+", "-", n.lower()).strip("-") or "airmaster-4f2a"
 print("http://localhost:%d mode %s" % (PORT, MODE))
+import threading
+threading.Thread(target=http.server.ThreadingHTTPServer(("127.0.0.1", PORT + 100), H).serve_forever, daemon=True).start()
 http.server.ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()

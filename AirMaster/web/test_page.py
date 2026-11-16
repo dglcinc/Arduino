@@ -75,9 +75,12 @@ try:
         p = page(); p.goto(url("normal"))
         p.get_by_text("Airflow, CFM").wait_for(); p.wait_for_function("document.querySelector('.chip.on')")
         ok(p.locator(".chip.on").all_inner_texts() == ["Fan", "Cool 1"], "calls light their chips")
-        p.wait_for_function("!document.getElementById('units').hidden")
-        names = p.locator("#units option").all_inner_texts()
-        ok(len(names) == 3 and "airmaster.local" in names[1] and p.locator("#units").input_value() == "", "the unit menu lists every unit, this one chosen")
+        p.wait_for_function("document.querySelectorAll('#units .ut .c.live').length == 2")
+        tiles = [t.split("\n") for t in p.locator("#units .ut").all_inner_texts()]
+        ok([t[0] for t in tiles] == ["Kids Room", "Master Bedroom", "Utility"] and p.locator("#units .ut.on b").inner_text() == "Master Bedroom", "a tile for every unit, this one marked")
+        ok(tiles[0][1:] == ["Unico 3036", "Heating, high", "600 CFM \u00b7 1630 RPM"] and tiles[1][1:] == ["Unico 2430", "Cooling, low", "300 CFM \u00b7 1045 RPM"]
+           and tiles[2][1:] == ["Unico 2430", "Idle", "Fan off"], "each tile shows unit type, call and blower")
+        ok(p.locator("#units a.ut:not(.on)").first.get_attribute("href").startswith("http://127.0.0.1:"), "another unit's tile opens that unit")
         body = p.locator("main").inner_text()
         ok("49.8 °F" in body and "5.6 °F" in body and "not calibrated" in body, "temperatures, coil difference and the calibration warning")
         ok("2430" in body and "Unit type" in body, "the status shows the unit type")

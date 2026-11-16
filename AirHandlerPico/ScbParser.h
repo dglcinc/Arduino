@@ -57,6 +57,10 @@ class ScbParser {
     return s1 == 0 && s2 == 0 && f[len - 1] != 0 && f[len - 2] != 0;
   }
 
+  // A 3036 the unit learned from an earlier 51-byte frame and kept through a restart. The answer holds while the
+  // chassis bits still say 3642, and the next 51-byte frame decides it afresh.
+  void recall3036() { lastChassis = 2; is3036 = true; }
+
  private:
   static const uint8_t STATUS_ID = 0x83, LOG_ID = 0x84, PC_TAG = 0x1C;
 

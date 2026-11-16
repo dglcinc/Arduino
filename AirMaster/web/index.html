@@ -12,7 +12,13 @@
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
 header{background:var(--card);border-bottom:1px solid var(--line);padding:12px 16px}
 h1{font-size:19px;margin:0}header small{color:var(--dim)}
-#units{margin:8px 0 0;min-height:38px;padding:6px 8px}
+#units{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,220px));gap:8px;margin-top:10px}
+.ut{display:block;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:8px 10px;text-decoration:none;min-height:44px}
+.ut.on{border-color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc)}
+.ut b,.ut span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ut b{font-size:15px}.ut span{font-size:13px;color:var(--dim);font-variant-numeric:tabular-nums}
+.ut .c.live{color:var(--acc);font-weight:600}
+@media(max-width:480px){#units{grid-template-columns:1fr}.ut{display:grid;grid-template-rows:auto auto;grid-auto-flow:column;grid-template-columns:1fr auto;column-gap:12px}.ut .c,.ut .f{text-align:right}}
 nav{display:flex;gap:4px;margin-top:10px}
 nav button{flex:1;background:none;border:0;border-bottom:3px solid transparent;color:var(--dim);padding:8px 4px;font:inherit;border-radius:0;min-height:44px}
 nav button.on{color:var(--acc);border-color:var(--acc);font-weight:600}
@@ -43,7 +49,7 @@ code{font-size:13px;word-break:break-all}
 [hidden]{display:none!important}
 </style></head><body>
 <header><h1 id="title">AirMaster</h1><small id="sub"></small>
-<select id="units" hidden aria-label="Other AirMasters"></select>
+<div id="units" hidden aria-label="AirMasters on this network"></div>
 <nav id="nav" hidden><button data-t="status" class="on">Status</button><button data-t="settings">Settings</button><button data-t="unit">Unit</button></nav></header>
 <main id="main"></main>
 <script>
@@ -308,17 +314,47 @@ async function refresh(){
   document.getElementById("title").textContent=info.name?info.name:"AirMaster";
   document.getElementById("sub").textContent=info.name?"AirMaster":"for Unico SMART controller";
 }
-// every AirMaster this one hears; the one with the earliest serial also answers at airmaster.local
+// Every AirMaster this one hears, one tile each: name, unit type, the call in force and the blower. A tile opens its unit.
+// This unit's tile reads its own line; another's is read from that unit, which allows it for /data alone.
+const CALL_ORDER=["E","W2","W1","Y2","Y1","G"];
+let unitKey="",unitTiles=[],tileTimer=null;
+function callOf(d){for(const k of CALL_ORDER)if(d[k.toLowerCase()]===1)return MODES.find(m=>m[0]===k)[1];return "Idle"}
+async function peek(u){
+  const c=new AbortController(),t=setTimeout(()=>c.abort(),4000);
+  try{const r=await fetch(u.self?"/data":"http://"+u.ip+"/data",{cache:"no-store",signal:c.signal});return await r.json()}catch(e){return null}finally{clearTimeout(t)}
+}
+function paintTile(t,d){
+  const live=d&&d.scb_age!==undefined;
+  t.type.textContent=d&&d.model?"Unico "+d.model:t.u.serial||"AirMaster";
+  t.call.textContent=!d?"No answer":live?callOf(d):"No control board data";
+  t.call.classList.toggle("live",!!live&&callOf(d)!=="Idle");
+  t.fan.textContent=!live||d.cfm===undefined?"\u2013":d.cfm>0?d.cfm+" CFM \u00b7 "+d.rpm+" RPM":"Fan off";
+}
+async function pollTiles(){
+  clearTimeout(tileTimer);
+  if(!document.hidden)await Promise.all(unitTiles.map(async t=>paintTile(t,await peek(t.u))));
+  tileTimer=setTimeout(pollTiles,5000);
+}
 async function listUnits(){
   let r;try{r=await get("/api/units")}catch(e){return}
   const us=(r.units||[]).filter(u=>u.ip);
   const box=document.getElementById("units");
-  if(us.length<2){box.hidden=true;return}
+  if(us.length<2){box.hidden=true;unitTiles=[];unitKey="";return}
   us.sort((a,b)=>(a.name||a.serial).localeCompare(b.name||b.serial));
-  box.replaceChildren(...us.map(u=>$("option",{value:u.self?"":"http://"+u.ip+"/",textContent:(u.name||u.host||u.ip)+(u.serial?" \u00b7 "+u.serial:"")+(u.leads?" \u00b7 "+r.lead+".local":""),selected:!!u.self})));
+  const key=JSON.stringify(us);
+  if(key===unitKey)return;
+  unitKey=key;
+  unitTiles=us.map(u=>{
+    const t={u,type:$("span",{class:"t"}),call:$("span",{class:"c",textContent:"\u2013"}),fan:$("span",{class:"f",textContent:"\u2013"})};
+    const a=u.self?{class:"ut on","aria-current":"true"}:{class:"ut",href:"http://"+u.ip+"/"};
+    t.el=$("a",a,$("b",{textContent:u.name||u.host||u.ip}),t.type,t.call,t.fan);
+    t.type.textContent=u.serial||"AirMaster";
+    return t;
+  });
+  box.replaceChildren(...unitTiles.map(t=>t.el));
   box.hidden=false;
+  pollTiles();
 }
-document.getElementById("units").addEventListener("change",e=>{if(e.target.value)location.href=e.target.value});
 document.getElementById("nav").addEventListener("click",e=>{if(e.target.dataset.t){tab=e.target.dataset.t;show()}});
 (async()=>{
   try{await refresh()}catch(e){main.replaceChildren(msg("Cannot reach the AirMaster. Reload to try again.","bad"));return}
