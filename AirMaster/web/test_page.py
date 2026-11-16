@@ -81,6 +81,13 @@ try:
         ok(tiles[0][1:] == ["Unico 3036", "Heating, high", "600 CFM \u00b7 1630 RPM"] and tiles[1][1:] == ["Unico 2430", "Cooling, low", "300 CFM \u00b7 1045 RPM"]
            and tiles[2][1:] == ["Unico 2430", "Idle", "Fan off"], "each tile shows unit type, call and blower")
         ok(p.locator("#units a.ut:not(.on)").first.get_attribute("href").startswith("http://127.0.0.1:"), "another unit's tile opens that unit")
+        # the same page under a reverse proxy's path: every request relative, the other units its siblings
+        px = page(); px.goto(url("normal") + "px/master-bedroom/")
+        px.wait_for_function("document.querySelectorAll('#units .ut .c.live').length == 2")
+        ok(px.locator("#units a.ut:not(.on)").first.get_attribute("href") == "../kids-room/" and "Heating, high" in px.locator("#units .ut").first.inner_text()
+           and "Airflow, CFM" in px.locator("main").inner_text(), "under a proxy path the page and its tiles work")
+        px.locator("#units a.ut:not(.on)").first.click(); px.wait_for_url("**/px/kids-room/")
+        px.wait_for_function("document.querySelectorAll('#units .ut').length == 3"); ok(True, "a tile there opens the sibling path")
         body = p.locator("main").inner_text()
         ok("49.8 °F" in body and "5.6 °F" in body and "not calibrated" in body, "temperatures, coil difference and the calibration warning")
         ok("2430" in body and "Unit type" in body, "the status shows the unit type")

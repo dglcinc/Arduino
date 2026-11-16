@@ -48,7 +48,15 @@ class H(http.server.BaseHTTPRequestHandler):
     def logged(self):
         c = self.headers.get("Cookie", "")
         return any(p.strip()[2:] in st["sessions"] for p in c.split(";") if p.strip().startswith("s="))
+    def via(self):
+        """Strips /px/<host>/, the path a reverse proxy would serve this unit under, and returns the host named."""
+        parts = self.path.split("/", 3)
+        if len(parts) > 3 and parts[1] == "px":
+            self.path = "/" + parts[3]
+            return parts[2]
+        return ""
     def do_GET(self):
+        unit = self.via()
         p = urllib.parse.urlparse(self.path).path
         if p == "/" and "text/html" in self.headers.get("Accept", ""):
             b = open(os.path.join(HERE, "index.html"), "rb").read()
@@ -62,8 +70,8 @@ class H(http.server.BaseHTTPRequestHandler):
             d = {"wsup": 49.81 + st["off"]["wsup"], "wret": 55.37 + st["off"]["wret"], "aret": 76.12 + st["off"]["aret"], "asup": 58.4 + st["off"]["asup"], "g": 1, "y1": 1, "y2": 0, "w1": 0, "w2": 0, "e": 0,
                  "cfm": S["cfm"]["Y1"], "rpm": 1045, "flags": 32, "scb_age": .4, "y2_s": 4312, "cal": 1 if any(st["off"].values()) else 0, "rssi": -61, "uptime_ms": int(t * 1000) + 5000000, "reboots": 1, "last_boot": "WiFi lost", "model": 2430}
             # The two other units on the tiles are this simulator at other addresses: one idle, one heating on high.
-            if self.server.server_port != PORT: d.update(y1=0, w1=1, w2=1, cfm=S["cfm"]["W2"], rpm=1630, model=3036)
-            elif self.headers.get("Host", "").startswith("127.0.0.1"): d.update(g=0, y1=0, cfm=0, rpm=0)
+            if self.server.server_port != PORT or unit == "kids-room": d.update(y1=0, w1=1, w2=1, cfm=S["cfm"]["W2"], rpm=1630, model=3036)
+            elif self.headers.get("Host", "").startswith("127.0.0.1") or unit == "utility": d.update(g=0, y1=0, cfm=0, rpm=0)
             return self.send(200, d, cors=p == "/data")
         if p == "/settings":
             busy = time.time() < st["job_done"]
@@ -83,6 +91,7 @@ class H(http.server.BaseHTTPRequestHandler):
                                    "cal": 1 if any(st["off"].values()) else 0, "by_order": st["by_order"], "backup": 1 if st["backup"] else 0, "mqtt_host": st["mqtt"]["host"], "mqtt_port": st["mqtt"]["port"], "mqtt_user": st["mqtt"]["user"], "mqtt_pass_set": 1 if st["mqtt"]["pass"] else 0, "mqtt_writes": st["mqtt"]["writes"], "mqtt_state": "connected" if st["mqtt"]["host"] else "off", "offsets": st["off"], "probes": st["probes"], "networks": nets})
         return self.send(404, {"error": "not found"})
     def do_POST(self):
+        self.via()
         p = urllib.parse.urlparse(self.path).path
         n = int(self.headers.get("Content-Length", 0)); raw = self.rfile.read(n)
         if not self.headers.get("X-AirMaster"): return self.send(403, {"error": "use the AirMaster page"})

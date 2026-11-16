@@ -83,7 +83,7 @@
 #include "MqttDiscovery.h"
 #include "web_page.h"
 
-#define FW_VERSION "1.2.3"
+#define FW_VERSION "1.2.4"
 #define LOG_PORT 5515
 #ifndef ROM_WSUP
 #define ROM_WSUP { 0, 0, 0, 0, 0, 0, 0, 0 }
@@ -1232,7 +1232,7 @@ void receiveUpdate(WiFiClient &c, const HttpRequest &r, char *body, size_t len) 
 }
 
 int route(WiFiClient &c, const HttpRequest &r, char *form, char *body, size_t len, uint32_t now, const char **extra) {
-  static char cookie[100];
+  static char cookie[128];                     // the login cookie header is 100 characters, and needs its CR LF whole
   const char *t = r.target;
   bool get = !strcmp(r.method, "GET"), post = !strcmp(r.method, "POST");
   if (get) {
