@@ -72,6 +72,7 @@ int main(int argc, char **argv) {
     strcpy(c.mqttPass, "p&ss=%");
     c.mqttPort = 1884;
     c.mqttWrites = true;
+    c.ledPct = 35;
     char b[1500];
     size_t n = saveConfig(c, b, sizeof(b));
     assert(n < sizeof(b));
@@ -80,10 +81,15 @@ int main(int argc, char **argv) {
     assert(!strcmp(o.ssid, c.ssid) && !strcmp(o.pass, c.pass) && !strcmp(o.name, c.name) && !strcmp(o.hash, c.hash));
     assert(o.romSup[0] == 0x28 && o.romSup[7] == 0xAB && o.romRet[0] == 0);
     assert(o.offAret == -0.25f && o.calibrated() && o.hasWifi() && o.hasAdmin());
-    assert(!strcmp(o.mqttHost, "broker.local") && !strcmp(o.mqttUser, "ha user") && !strcmp(o.mqttPass, "p&ss=%") && o.mqttPort == 1884 && o.mqttWrites);
+    assert(!strcmp(o.mqttHost, "broker.local") && !strcmp(o.mqttUser, "ha user") && !strcmp(o.mqttPass, "p&ss=%") && o.mqttPort == 1884 && o.mqttWrites && o.ledPct == 35);
     char oldFile[] = "v=1\nssid=4142\n";            // a file saved before MQTT existed
     UnitConfig older;
     assert(loadConfig(oldFile, older) && !strcmp(older.ssid, "AB") && !older.mqttHost[0] && older.mqttPort == 1883 && !older.mqttWrites);
+    assert(older.ledPct == 100);                    // and before the brightness setting: fully on, as it always was
+    char bright[] = "v=1\nled=250\n";               // a value past the range is held to it
+    UnitConfig capped;
+    assert(loadConfig(bright, capped) && capped.ledPct == 100);
+    assert(ledLevel(0) == 0 && ledLevel(1) == 1 && ledLevel(50) == 2500 && ledLevel(100) == LED_PWM_RANGE && ledLevel(200) == LED_PWM_RANGE);
     char junk[] = "this is not a config";
     UnitConfig untouched;
     assert(!loadConfig(junk, untouched) && !untouched.hasWifi());

@@ -15,7 +15,7 @@ S = {"cfm": dict(zip(M, (300, 300, 600, 300, 600, 600))), "rpm": dict(zip(M, (90
      "auto": {"style": "maxcomfort"}, "damper": "powerclose", "cfm_max": 750, "rpm_min": 400, "rpm_max": 1800, "age_s": 0}
 st = {"mode": MODE, "name": "" if MODE == "setup" else "Master Bedroom", "admin": "" if MODE == "setup" else "testpass1", "sessions": set(), "backup": None,
       "job_done": 0.0, "result": "none", "error": "", "t0": time.time(), "probes": [{"rom": "28aabbccdd000001", "role": "sup", "f": 49.81}, {"rom": "28aabbccdd000002", "role": "ret", "f": 55.37}],
-      "off": {"wsup": 0, "wret": 0, "asup": 0, "aret": 0}, "by_order": 1, "log": [], "mqtt": {"host": "", "port": 1883, "user": "", "pass": "", "writes": 0}}
+      "off": {"wsup": 0, "wret": 0, "asup": 0, "aret": 0}, "by_order": 1, "log": [], "mqtt": {"host": "", "port": 1883, "user": "", "pass": "", "writes": 0}, "led": 100}
 def snapshot():
     return json.loads(json.dumps(S))
 def job(result):
@@ -88,7 +88,7 @@ class H(http.server.BaseHTTPRequestHandler):
             nets = [{"ssid": "redux-test", "rssi": -48, "open": 0}, {"ssid": "Neighbor's \"Net\" <b>x</b>", "rssi": -80, "open": 0}, {"ssid": "CoffeeOpen", "rssi": -70, "open": 1}] if setup else []
             return self.send(200, {"mode": st["mode"], "fw": "1.0.0", "serial": "AM-0001", "name": st["name"], "host": hostname(st["name"]), "ap": "AirMaster-4F2A", "ssid": "" if setup else "redux-test",
                                    "ip": "" if setup else "10.0.0.50", "error": st["error"], "admin": 1 if st["admin"] else 0, "wifi": 0 if st["mode"] == "setup" else 1, "logged_in": 1 if self.logged() else 0,
-                                   "cal": 1 if any(st["off"].values()) else 0, "by_order": st["by_order"], "backup": 1 if st["backup"] else 0, "mqtt_host": st["mqtt"]["host"], "mqtt_port": st["mqtt"]["port"], "mqtt_user": st["mqtt"]["user"], "mqtt_pass_set": 1 if st["mqtt"]["pass"] else 0, "mqtt_writes": st["mqtt"]["writes"], "mqtt_state": "connected" if st["mqtt"]["host"] else "off", "offsets": st["off"], "probes": st["probes"], "networks": nets})
+                                   "cal": 1 if any(st["off"].values()) else 0, "by_order": st["by_order"], "backup": 1 if st["backup"] else 0, "mqtt_host": st["mqtt"]["host"], "mqtt_port": st["mqtt"]["port"], "mqtt_user": st["mqtt"]["user"], "mqtt_pass_set": 1 if st["mqtt"]["pass"] else 0, "mqtt_writes": st["mqtt"]["writes"], "mqtt_state": "connected" if st["mqtt"]["host"] else "off", "led": st["led"], "offsets": st["off"], "probes": st["probes"], "networks": nets})
         return self.send(404, {"error": "not found"})
     def do_POST(self):
         self.via()
@@ -138,6 +138,9 @@ class H(http.server.BaseHTTPRequestHandler):
                 st["admin"] = f["admin"]
             for k in ("wsup", "wret", "asup", "aret"):
                 if "off" + k in f: st["off"][k] = float(f["off" + k])
+            if "led" in f:
+                if not f["led"].isdigit() or int(f["led"]) > 100: return self.send(400, {"error": "Brightness is 0 to 100."})
+                st["led"] = int(f["led"])
             if "romsup" in f:
                 if f["romsup"] == f["romret"]: return self.send(400, {"error": "Choose two different probes."})
                 st["by_order"] = 0

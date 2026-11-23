@@ -44,7 +44,8 @@
 //        /api/reboot, /api/factory-reset
 //
 // Pins: native USB is the host for the Unico's USB board, through TP2 and TP3. GP4 and GP5 are I2C to the DS2482
-// and the ADS1115. GP8 Y1, GP9 Y2, GP10 W1, GP11 W2 and GP12 FAN drive the LEDs through 220 ohm. GP0 is a log.
+// and the ADS1115. GP8 Y1, GP9 Y2, GP10 W1, GP11 W2 and GP12 FAN drive the LEDs through 220 ohm,
+// by PWM at the brightness saved on the unit; the power LED is on 3V3 and takes no setting. GP0 is a log.
 //
 // The JSON line, which pivac.UnicoSCB reads as JSON and pivac.ArduinoSensor as a Python literal. A sensor that did not read
 // is left out, and every SCB field is left out once no status frame has arrived for 10 s. Temperatures include the
@@ -83,7 +84,7 @@
 #include "MqttDiscovery.h"
 #include "web_page.h"
 
-#define FW_VERSION "1.2.4"
+#define FW_VERSION "1.2.5"
 #define LOG_PORT 5515
 #ifndef ROM_WSUP
 #define ROM_WSUP { 0, 0, 0, 0, 0, 0, 0, 0 }
@@ -363,14 +364,21 @@ void watchSilence(uint32_t now) {
   if (quiet > STALL_REBOOT_MS && SCRATCH_STALLS == 0) rebootNow(haveFrame ? RB_SCB_SILENT : RB_SCB_NONE, true);
 }
 
+// Each LED is lit at the saved brightness. A pin is written only when its level changes, since this runs every loop.
 void showLeds(uint32_t now) {
+  static const uint8_t PINS[5] = {PIN_Y1, PIN_Y2, PIN_W1, PIN_W2, PIN_FAN};
+  static int shown[5] = {-1, -1, -1, -1, -1};
   bool fresh = haveFrame && now - lastFrameMs < LED_STALE_MS;
   const ScbStatus &s = parser.status;
-  digitalWrite(PIN_Y1, fresh && s.y1);
-  digitalWrite(PIN_Y2, fresh && s.y2);
-  digitalWrite(PIN_W1, fresh && s.w1);
-  digitalWrite(PIN_W2, fresh && s.w2);
-  digitalWrite(PIN_FAN, fresh ? (s.hasAirflow && s.actualRpm > 0) : (now / 1000) & 1);
+  bool on[5] = {fresh && s.y1, fresh && s.y2, fresh && s.w1, fresh && s.w2,
+                fresh ? (s.hasAirflow && s.actualRpm > 0) : (bool)((now / 1000) & 1)};
+  int level = (int)unit::ledLevel(cfg.ledPct);
+  for (int i = 0; i < 5; i++) {
+    int want = on[i] ? level : 0;
+    if (want == shown[i]) continue;
+    shown[i] = want;
+    analogWrite(PINS[i], want);
+  }
 }
 
 // --- HTTP -----------------------------------------------------------------------------------------
@@ -1061,6 +1069,7 @@ void infoJson(char *b, size_t len, const HttpRequest &r, uint32_t now) {
   n = apStr(b, n, len, "mqtt_user", cfg.mqttUser);
   n = apStr(b, n, len, "mqtt_state", mqttStatus);
   n = ap(b, n, len, "\"mqtt_port\":%u,\"mqtt_pass_set\":%d,\"mqtt_writes\":%d,", cfg.mqttPort, cfg.mqttPass[0] ? 1 : 0, cfg.mqttWrites ? 1 : 0);
+  n = ap(b, n, len, "\"led\":%u,", (unsigned)cfg.ledPct);
   n = ap(b, n, len, "\"offsets\":{\"wsup\":%.3f,\"wret\":%.3f,\"asup\":%.3f,\"aret\":%.3f},\"probes\":[", cfg.offWsup, cfg.offWret, cfg.offAsup, cfg.offAret);
   for (int i = 0; i < nFound; i++) {
     char rom[17];
@@ -1154,7 +1163,7 @@ int postSetup(const char *form, char *body, size_t len, uint32_t now) {
   return 200;
 }
 
-// Name, admin password, sensor roles and offsets, each only when present.
+// Name, admin password, sensor roles, offsets and LED brightness, each only when present.
 int postUnit(const char *form, char *body, size_t len) {
   char v[64];
   if (unit::formGet(form, "name", v, 33) && v[0]) strcpy(cfg.name, v);
@@ -1193,6 +1202,12 @@ int postUnit(const char *form, char *body, size_t len) {
     float f = strtof(v, &end);
     if (end == v || *end || !isfinite(f) || fabsf(f) > 20) return jobError(body, len, 400, "Offsets are degrees F, within 20.");
     *o.p = f;
+  }
+  if (unit::formGet(form, "led", v, sizeof(v))) {
+    char *end;
+    long p = strtol(v, &end, 10);
+    if (end == v || *end || p < 0 || p > 100) return jobError(body, len, 400, "Brightness is 0 to 100.");
+    cfg.ledPct = (uint8_t)p;
   }
   if (!saveUnit()) return jobError(body, len, 500, "could not save");
   snprintf(body, len, "{\"ok\":1}");
@@ -1401,6 +1416,8 @@ void setup() {
   }
   SCRATCH_BOOT &= 1;
   Serial1.begin(115200);
+  analogWriteFreq(1000);                   // 1 kHz shows no flicker
+  analogWriteRange(unit::LED_PWM_RANGE);
   for (uint8_t p : {PIN_Y1, PIN_Y2, PIN_W1, PIN_W2, PIN_FAN}) {
     pinMode(p, OUTPUT);
     digitalWrite(p, LOW);
