@@ -1,9 +1,9 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AirMaster</title>
-<link rel="icon" type="image/png" href="/icon-192.png">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
 <meta name="apple-mobile-web-app-title" content="AirMaster">
 <style>
 :root{--ink:#17202a;--dim:#5d6b78;--line:#d8dee4;--bg:#f3f5f7;--card:#fff;--acc:#135ea8;--ok:#14803c;--bad:#b42318;--warn:#fff4d6;--warnink:#6b4e00}
@@ -12,7 +12,13 @@
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
 header{background:var(--card);border-bottom:1px solid var(--line);padding:12px 16px}
 h1{font-size:19px;margin:0}header small{color:var(--dim)}
-#units{margin:8px 0 0;min-height:38px;padding:6px 8px}
+#units{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,220px));gap:8px;margin-top:10px}
+.ut{display:block;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:8px 10px;text-decoration:none;min-height:44px}
+.ut.on{border-color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc)}
+.ut b,.ut span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ut b{font-size:15px}.ut span{font-size:13px;color:var(--dim);font-variant-numeric:tabular-nums}
+.ut .c.live{color:var(--acc);font-weight:600}
+@media(max-width:480px){#units{grid-template-columns:1fr}.ut{display:grid;grid-template-rows:auto auto;grid-auto-flow:column;grid-template-columns:1fr auto;column-gap:12px}.ut .c,.ut .f{text-align:right}}
 nav{display:flex;gap:4px;margin-top:10px}
 nav button{flex:1;background:none;border:0;border-bottom:3px solid transparent;color:var(--dim);padding:8px 4px;font:inherit;border-radius:0;min-height:44px}
 nav button.on{color:var(--acc);border-color:var(--acc);font-weight:600}
@@ -43,7 +49,7 @@ code{font-size:13px;word-break:break-all}
 [hidden]{display:none!important}
 </style></head><body>
 <header><h1 id="title">AirMaster</h1><small id="sub"></small>
-<select id="units" hidden aria-label="Other AirMasters"></select>
+<div id="units" hidden aria-label="AirMasters on this network"></div>
 <nav id="nav" hidden><button data-t="status" class="on">Status</button><button data-t="settings">Settings</button><button data-t="unit">Unit</button></nav></header>
 <main id="main"></main>
 <script>
@@ -93,7 +99,7 @@ function renderSetup(){
     if(fresh&&!ssid){err.append(msg("Choose a WiFi network.","bad"));return}
     go.disabled=true;
     try{
-      const r=await post("/api/setup",{ssid,pass:pass.value,name:name.value});
+      const r=await post("api/setup",{ssid,pass:pass.value,name:name.value});
       renderJoining(r.host,r.ap,!!ssid);
     }catch(e){err.append(msg(e.message,"bad"));go.disabled=false}
   });
@@ -127,7 +133,7 @@ async function renderStatus(){
     foot);
   const tick=async()=>{
     try{
-      const d=await get("/data");
+      const d=await get("data");
       for(const k in chipEls)chipEls[k].classList.toggle("on",d[k]===1);
       s.cfm.textContent=d.cfm===undefined?"–":d.cfm;s.rpm.textContent=d.rpm===undefined?"–":d.rpm;s.model.textContent=d.model||"–";
       s.wsup.textContent=fmtF(d.wsup);s.wret.textContent=fmtF(d.wret);s.wd.textContent=diff(d.wret,d.wsup);
@@ -147,7 +153,7 @@ function uptime(ms){const m=Math.floor(ms/60000);if(m<60)return m+" min";const h
 async function waitJob(status){
   for(let i=0;i<40;i++){
     await sleep(1000);
-    const s=await get("/settings");
+    const s=await get("settings");
     if(s.job==="idle")return s;
     status.textContent="Working…";
   }
@@ -156,7 +162,7 @@ async function waitJob(status){
 function loginBox(after){
   const pw=$("input",{type:"password",autocomplete:"current-password"}),err=$("div");
   const b=$("button",{textContent:"Log in"});
-  const go=async()=>{err.replaceChildren();b.disabled=true;try{await post("/api/login",{password:pw.value});await refresh();after()}catch(e){err.append(msg(e.message,"bad"));b.disabled=false}};
+  const go=async()=>{err.replaceChildren();b.disabled=true;try{await post("api/login",{password:pw.value});await refresh();after()}catch(e){err.append(msg(e.message,"bad"));b.disabled=false}};
   b.addEventListener("click",go);
   pw.addEventListener("keydown",e=>{if(e.key==="Enter")go()});
   return $("section",{},$("h2",{textContent:"Log in to change settings"}),field("Password, the one on the label unless you changed it",pw),err,$("div",{class:"bar"},b));
@@ -168,7 +174,7 @@ async function renderSettings(){
   const status=$("div",{class:"note",textContent:"Asking the control board for its settings…"});
   main.replaceChildren($("section",{},status));
   let s;
-  try{await post("/api/settings/read");s=await waitJob(status)}
+  try{await post("api/settings/read");s=await waitJob(status)}
   catch(e){main.replaceChildren(msg(e.message,"bad"),$("div",{class:"bar"},$("button",{textContent:"Try again",on:{click:renderSettings}})));return}
   if(s.cfm===undefined||s.result!=="read"){main.replaceChildren(msg("The control board did not report its settings: "+s.result,"bad"),$("div",{class:"bar"},$("button",{textContent:"Try again",on:{click:renderSettings}})));return}
   draftForm(s);
@@ -203,7 +209,7 @@ function draftForm(s,note){
       await fn();
       const r=await waitJob(st);
       if(r.result==="stored"||r.result==="no change"||r.result==="read"){
-        await post("/api/settings/read");const fresh=await waitJob(st);
+        await post("api/settings/read");const fresh=await waitJob(st);
         draftForm(fresh,msg(done,"ok"));scrollTo(0,0);return;
       }
       st.textContent="";out.replaceChildren(msg(r.result,"bad"));
@@ -219,9 +225,9 @@ function draftForm(s,note){
     }
     const keys=Object.keys(ch);
     if(!keys.length){out.replaceChildren(msg("Nothing has changed."));scrollTo(0,0);return}
-    confirmBox("Change "+keys.length+" setting"+(keys.length>1?"s":"")+" on the control board?",keys.map(k=>k+": "+orig[k]+" to "+ch[k]),()=>run(()=>post("/api/set",ch),"Saved. The control board reports the new values as stored."),out);
+    confirmBox("Change "+keys.length+" setting"+(keys.length>1?"s":"")+" on the control board?",keys.map(k=>k+": "+orig[k]+" to "+ch[k]),()=>run(()=>post("api/set",ch),"Saved. The control board reports the new values as stored."),out);
   });
-  restore.addEventListener("click",()=>confirmBox("Put back the settings this unit first read?",[],()=>run(()=>post("/api/restore"),"The original settings are back."),out));
+  restore.addEventListener("click",()=>confirmBox("Put back the settings this unit first read?",[],()=>run(()=>post("api/restore"),"The original settings are back."),out));
 }
 function confirmBox(text,lines,yes,where){
   const list=$("ul");for(const l of lines)list.append($("li",{textContent:l}));
@@ -242,7 +248,7 @@ function renderUnit(){
   if(!info.logged_in){main.append(loginBox(renderUnit));return}
   const name=$("input",{value:info.name,maxLength:32});
   main.append($("section",{},$("h2",{textContent:"Name"}),field("Unit name",name),$("p",{class:"note",textContent:"A new name changes the unit's address after it restarts."}),$("div",{class:"bar"},
-    $("button",{textContent:"Save and restart",on:{click:async()=>{await act(out,async()=>{await post("/api/unit",{name:name.value});await post("/api/reboot");restarting(out)})}}}))));
+    $("button",{textContent:"Save and restart",on:{click:async()=>{await act(out,async()=>{await post("api/unit",{name:name.value});await post("api/reboot");restarting(out)})}}}))));
   // sensors
   const opts=info.probes.map(p=>[p.rom,p.rom.slice(-6)+(p.f!==undefined?"  "+p.f.toFixed(1)+" °F":"  no reading")]);
   const sup=$("select",{}),ret=$("select",{});
@@ -259,7 +265,7 @@ function renderUnit(){
     $("div",{class:"bar"},$("button",{textContent:"Save sensors",on:{click:()=>act(out,async()=>{
       const f={};for(const k in offs)f[k]=offs[k].value;
       if(opts.length>=2){f.romsup=sup.value;f.romret=ret.value}
-      await post("/api/unit",f);await refresh();renderUnit();
+      await post("api/unit",f);await refresh();renderUnit();
       main.firstChild.replaceChildren(msg("Saved.","ok"));
     })}})));
   main.append(sens);
@@ -274,25 +280,25 @@ function renderUnit(){
     field("Allow Home Assistant to change settings",mw),
     $("p",{class:"note",textContent:"Changes are limited to one every 10 minutes, because each one writes to the control board's memory. The connection is not encrypted, so use a broker password you use nowhere else."}),
     $("div",{class:"bar"},$("button",{textContent:"Save",on:{click:()=>act(out,async()=>{
-      await post("/api/unit",{mqtthost:mh.value.trim(),mqttport:mport.value,mqttuser:mu.value,mqttpass:mp.value,mqttwrites:mw.value});
+      await post("api/unit",{mqtthost:mh.value.trim(),mqttport:mport.value,mqttuser:mu.value,mqttpass:mp.value,mqttwrites:mw.value});
       await refresh();renderUnit();main.firstChild.replaceChildren(msg("Saved.","ok"));
     })}}))));
   // password
   const a1=$("input",{type:"password",autocomplete:"new-password"}),a2=$("input",{type:"password",autocomplete:"new-password"});
   main.append($("section",{},$("h2",{textContent:"Admin password"}),$("p",{textContent:"The unit starts with the password on its label. Change it here if you want another."}),field("New password, 8 characters or more",a1),field("Again",a2),$("div",{class:"bar"},
-    $("button",{textContent:"Change password",on:{click:()=>act(out,async()=>{if(a1.value!==a2.value)throw new Error("The two passwords differ.");await post("/api/unit",{admin:a1.value});a1.value=a2.value="";out.replaceChildren(msg("Password changed.","ok"))})}}))));
+    $("button",{textContent:"Change password",on:{click:()=>act(out,async()=>{if(a1.value!==a2.value)throw new Error("The two passwords differ.");await post("api/unit",{admin:a1.value});a1.value=a2.value="";out.replaceChildren(msg("Password changed.","ok"))})}}))));
   // firmware
   const file=$("input",{type:"file",accept:".bin"}),prog=$("div",{class:"note"});
   main.append($("section",{},$("h2",{textContent:"Firmware update"}),field("Firmware file (.bin)",file),prog,$("div",{class:"bar"},
     $("button",{textContent:"Install",on:{click:()=>act(out,async()=>{
       const f=file.files[0];if(!f)throw new Error("Choose the firmware file first.");
       prog.textContent="Sending "+Math.round(f.size/1024)+" KB. Keep this page open.";
-      await post("/api/update",null,f);restarting(out)})}}))));
+      await post("api/update",null,f);restarting(out)})}}))));
   // the rest
   main.append($("section",{},$("h2",{textContent:"This unit"}),$("div",{class:"bar"},
-    $("button",{class:"q",textContent:"Log out",on:{click:()=>act(out,async()=>{await post("/api/logout");await refresh();renderUnit()})}}),
-    $("button",{class:"q",textContent:"Restart",on:{click:()=>act(out,async()=>{await post("/api/reboot");restarting(out)})}}),
-    $("button",{class:"d",textContent:"Erase and start over",on:{click:()=>confirmBox("Erase this unit's WiFi, name, admin password and saved original settings?",["The Unico control board keeps its current settings.","The unit then starts its setup network again, using the password on its label."],()=>act(out,async()=>{await post("/api/factory-reset");restarting(out)}),out)}})),
+    $("button",{class:"q",textContent:"Log out",on:{click:()=>act(out,async()=>{await post("api/logout");await refresh();renderUnit()})}}),
+    $("button",{class:"q",textContent:"Restart",on:{click:()=>act(out,async()=>{await post("api/reboot");restarting(out)})}}),
+    $("button",{class:"d",textContent:"Erase and start over",on:{click:()=>confirmBox("Erase this unit's WiFi, name, admin password and saved original settings?",["The Unico control board keeps its current settings.","The unit then starts its setup network again, using the password on its label."],()=>act(out,async()=>{await post("api/factory-reset");restarting(out)}),out)}})),
     $("p",{class:"note",textContent:"Forgot the password? Power the unit off and on three times, within 30 seconds each, then join its setup network with the password on its label."})));
 }
 function restarting(out){out.replaceChildren(msg("The unit is restarting. This page will reload in 30 seconds."));setTimeout(()=>location.reload(),30000);scrollTo(0,0)}
@@ -304,21 +310,55 @@ function show(){
   ({status:renderStatus,settings:renderSettings,unit:renderUnit})[tab]();
 }
 async function refresh(){
-  info=await get("/api/info");
+  info=await get("api/info");
   document.getElementById("title").textContent=info.name?info.name:"AirMaster";
   document.getElementById("sub").textContent=info.name?"AirMaster":"for Unico SMART controller";
 }
-// every AirMaster this one hears; the one with the earliest serial also answers at airmaster.local
+// Every AirMaster this one hears, one tile each: name, unit type, the call in force and the blower. A tile opens its unit.
+// This unit's tile reads its own line; another's is read from that unit, which allows it for /data alone.
+// Every address the page asks for is relative, so it also works under a reverse proxy's path. There the other units
+// are its siblings, each under its own host name: /airmaster/great-room/ beside /airmaster/master-bedroom/.
+const VIA_PROXY=location.pathname!=="/";
+const unitUrl=u=>VIA_PROXY?"../"+u.host+"/":"http://"+u.ip+"/";
+const CALL_ORDER=["E","W2","W1","Y2","Y1","G"];
+let unitKey="",unitTiles=[],tileTimer=null;
+function callOf(d){for(const k of CALL_ORDER)if(d[k.toLowerCase()]===1)return MODES.find(m=>m[0]===k)[1];return "Idle"}
+async function peek(u){
+  const c=new AbortController(),t=setTimeout(()=>c.abort(),4000);
+  try{const r=await fetch(u.self?"data":unitUrl(u)+"data",{cache:"no-store",signal:c.signal});return await r.json()}catch(e){return null}finally{clearTimeout(t)}
+}
+function paintTile(t,d){
+  const live=d&&d.scb_age!==undefined;
+  t.type.textContent=d&&d.model?"Unico "+d.model:t.u.serial||"AirMaster";
+  t.call.textContent=!d?"No answer":live?callOf(d):"No control board data";
+  t.call.classList.toggle("live",!!live&&callOf(d)!=="Idle");
+  t.fan.textContent=!live||d.cfm===undefined?"\u2013":d.cfm>0?d.cfm+" CFM \u00b7 "+d.rpm+" RPM":"Fan off";
+}
+async function pollTiles(){
+  clearTimeout(tileTimer);
+  if(!document.hidden)await Promise.all(unitTiles.map(async t=>paintTile(t,await peek(t.u))));
+  tileTimer=setTimeout(pollTiles,5000);
+}
 async function listUnits(){
-  let r;try{r=await get("/api/units")}catch(e){return}
+  let r;try{r=await get("api/units")}catch(e){return}
   const us=(r.units||[]).filter(u=>u.ip);
   const box=document.getElementById("units");
-  if(us.length<2){box.hidden=true;return}
+  if(us.length<2){box.hidden=true;unitTiles=[];unitKey="";return}
   us.sort((a,b)=>(a.name||a.serial).localeCompare(b.name||b.serial));
-  box.replaceChildren(...us.map(u=>$("option",{value:u.self?"":"http://"+u.ip+"/",textContent:(u.name||u.host||u.ip)+(u.serial?" \u00b7 "+u.serial:"")+(u.leads?" \u00b7 "+r.lead+".local":""),selected:!!u.self})));
+  const key=JSON.stringify(us);
+  if(key===unitKey)return;
+  unitKey=key;
+  unitTiles=us.map(u=>{
+    const t={u,type:$("span",{class:"t"}),call:$("span",{class:"c",textContent:"\u2013"}),fan:$("span",{class:"f",textContent:"\u2013"})};
+    const a=u.self?{class:"ut on","aria-current":"true"}:{class:"ut",href:unitUrl(u)};
+    t.el=$("a",a,$("b",{textContent:u.name||u.host||u.ip}),t.type,t.call,t.fan);
+    t.type.textContent=u.serial||"AirMaster";
+    return t;
+  });
+  box.replaceChildren(...unitTiles.map(t=>t.el));
   box.hidden=false;
+  pollTiles();
 }
-document.getElementById("units").addEventListener("change",e=>{if(e.target.value)location.href=e.target.value});
 document.getElementById("nav").addEventListener("click",e=>{if(e.target.dataset.t){tab=e.target.dataset.t;show()}});
 (async()=>{
   try{await refresh()}catch(e){main.replaceChildren(msg("Cannot reach the AirMaster. Reload to try again.","bad"));return}
