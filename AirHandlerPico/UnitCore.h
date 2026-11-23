@@ -296,6 +296,16 @@ inline size_t jsonStr(char *b, size_t n, size_t len, const char *s) {
   return n;
 }
 
+// --- LED brightness -------------------------------------------------------------------------------
+
+// The PWM level for a brightness of 0 to 100 percent, out of LED_PWM_RANGE. The eye reads light by ratio, so the level
+// goes as the square of the setting and each step of the slider looks alike; 100 is fully on.
+const unsigned LED_PWM_RANGE = 10000;
+inline unsigned ledLevel(unsigned pct) {
+  if (pct > 100) pct = 100;
+  return pct * pct;
+}
+
 // --- the saved configuration ----------------------------------------------------------------------
 
 struct UnitConfig {
@@ -311,6 +321,7 @@ struct UnitConfig {
   char  mqttPass[64] = "";
   unsigned mqttPort = 1883;
   bool  mqttWrites = false;                   // Home Assistant may change stored airflow; the owner opts in
+  uint8_t ledPct = 100;                       // brightness of the five call LEDs, 0 (off) to 100
 
   bool hasWifi() const { return ssid[0] != 0; }
   bool hasAdmin() const { return hash[0] != 0; }
@@ -328,8 +339,9 @@ inline size_t saveConfig(const UnitConfig &c, char *b, size_t len) {
   toHex((const uint8_t *)c.name, strlen(c.name), name);
   toHex(c.romSup, 8, ra);
   toHex(c.romRet, 8, rb);
-  return snprintf(b, len, "v=1\nssid=%s\npass=%s\nname=%s\nsalt=%s\nhash=%s\nromsup=%s\nromret=%s\noffwsup=%.3f\noffwret=%.3f\noffasup=%.3f\noffaret=%.3f\nmh=%s\nmu=%s\nmp=%s\nmport=%u\nmw=%d\n",
-                  ssid, pass, name, c.salt, c.hash, ra, rb, c.offWsup, c.offWret, c.offAsup, c.offAret, mh, mu, mp, c.mqttPort, c.mqttWrites ? 1 : 0);
+  return snprintf(b, len, "v=1\nssid=%s\npass=%s\nname=%s\nsalt=%s\nhash=%s\nromsup=%s\nromret=%s\noffwsup=%.3f\noffwret=%.3f\noffasup=%.3f\noffaret=%.3f\nmh=%s\nmu=%s\nmp=%s\nmport=%u\nmw=%d\nled=%u\n",
+                  ssid, pass, name, c.salt, c.hash, ra, rb, c.offWsup, c.offWret, c.offAsup, c.offAret, mh, mu, mp, c.mqttPort, c.mqttWrites ? 1 : 0,
+                  (unsigned)c.ledPct);
 }
 
 inline bool hexField(const char *v, char *out, size_t outLen) {
@@ -371,6 +383,7 @@ inline bool loadConfig(char *text, UnitConfig &out) {
     else if (!strcmp(k, "mp")) ok = hexField(v, c.mqttPass, sizeof(c.mqttPass));
     else if (!strcmp(k, "mport")) c.mqttPort = (unsigned)strtoul(v, nullptr, 10);
     else if (!strcmp(k, "mw")) c.mqttWrites = v[0] == '1';
+    else if (!strcmp(k, "led")) { unsigned long p = strtoul(v, nullptr, 10); c.ledPct = (uint8_t)(p > 100 ? 100 : p); }
     if (!ok) return false;
   }
   if (!sawVersion) return false;

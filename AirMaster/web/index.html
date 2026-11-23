@@ -269,6 +269,14 @@ function renderUnit(){
       main.firstChild.replaceChildren(msg("Saved.","ok"));
     })}})));
   main.append(sens);
+  // lights
+  const led=$("input",{type:"range",min:0,max:100,step:5,value:info.led}),ledPct=$("span",{textContent:info.led+" %"});
+  led.addEventListener("input",()=>{ledPct.textContent=led.value+" %"});
+  main.append($("section",{},$("h2",{textContent:"Lights"}),field("Brightness of the fan and call lights",led),$("p",{},ledPct),
+    $("p",{class:"note",textContent:"At 0 the lights stay off, and the fan light no longer blinks when the control board goes silent. The power light is not adjustable."}),
+    $("div",{class:"bar"},$("button",{textContent:"Save brightness",on:{click:()=>act(out,async()=>{
+      await post("api/unit",{led:led.value});await refresh();renderUnit();main.firstChild.replaceChildren(msg("Saved.","ok"));
+    })}}))));
   // Home Assistant
   const mh=$("input",{value:info.mqtt_host,placeholder:"homeassistant.local",autocapitalize:"off",autocorrect:"off"}),mport=$("input",{type:"number",value:info.mqtt_port,min:1,max:65535});
   const mu=$("input",{value:info.mqtt_user,autocapitalize:"off",autocorrect:"off",autocomplete:"off"}),mp=$("input",{type:"password",autocomplete:"new-password",placeholder:info.mqtt_pass_set?"Saved. Leave blank to keep it.":""});
