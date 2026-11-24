@@ -18,7 +18,8 @@
 // Connecting. The factory writes each unit an identity holding its setup password (UnitCore.h). The unit starts its own
 // WiFi network, AirMaster-<unit id>, when:
 //   - it has no saved home WiFi: first setup. It stays up.
-//   - it cannot join its saved WiFi. It reboots to try again after 10 minutes with nobody connected.
+//   - it cannot join its saved WiFi. With nobody connected it reboots to try again after 1 minute, then 1, 2 and 5,
+//     then every 10. /api/info keeps the first failure of the run as join_fail.
 //   - it has been powered up three times within 30 s of each other: recovery, for a forgotten password. Same 10 minutes.
 // It tries a new home WiFi by rebooting onto it, since the radio holds one channel and a phone on the setup network would
 // drop anyway; a failure brings the setup network back with the reason. The readings carry on through all of this.
@@ -64,6 +65,7 @@
 #include <Wire.h>
 #include "hardware/gpio.h"
 #include "hardware/watchdog.h"
+#include <pico/cyw43_arch.h>
 #include <stdarg.h>
 #include <LittleFS.h>
 #include <LEAmDNS.h>
@@ -84,7 +86,7 @@
 #include "MqttDiscovery.h"
 #include "web_page.h"
 
-#define FW_VERSION "1.2.5"
+#define FW_VERSION "1.2.6"
 #define LOG_PORT 5515
 #ifndef ROM_WSUP
 #define ROM_WSUP { 0, 0, 0, 0, 0, 0, 0, 0 }
@@ -110,6 +112,7 @@ const uint32_t DS_PERIOD_MS    = 2000;
 const uint32_t RESCAN_MS       = 30000;
 const uint32_t HTTP_TIMEOUT_MS = 2000;
 const uint32_t AP_IDLE_MS      = 600000;   // setup network with nobody on it, when there is a saved WiFi to retry
+const uint32_t FALLBACK_IDLE_MS[] = {60000, 60000, 120000, 300000};   // the first retries of a saved WiFi come sooner
 const uint32_t BOOT_WINDOW_MS  = 30000;    // a power-up lasting less counts toward recovery
 const int      RECOVERY_BOOTS  = 3;
 const uint32_t LOGIN_DELAY_MS  = 2000;     // after a wrong password
@@ -128,7 +131,9 @@ const uint32_t SCRATCH_MAGIC = 0xA1B2C3D4;
 #define SCRATCH_STALLS watchdog_hw->scratch[1]    // stall restarts since the last frame, so a silent line restarts the unit once
 #define SCRATCH_TOTAL  watchdog_hw->scratch[2]    // reboots since power-on, on the node's line
 #define SCRATCH_BOOT   watchdog_hw->scratch[3]    // bit 0: this boot was a power-up, which counts toward recovery;
-                                                  // bits 8-15: why the firmware last rebooted (RebootWhy)
+                                                  // bits 8-15: why the firmware last rebooted (RebootWhy);
+                                                  // bits 16-23: retries of the saved WiFi since it last joined
+const uint32_t BOOT_RETRIES = 0x00FF0000;
 // scratch[4] to [7] belong to the SDK's watchdog_reboot()
 
 enum RebootWhy : uint8_t { RB_RESET, RB_REQUESTED, RB_WIFI, RB_AP_IDLE, RB_SCB_SILENT, RB_SCB_NONE, RB_WATCHDOG, RB_POWER, RB_COUNT };
@@ -170,7 +175,8 @@ enum Mode { M_NORMAL, M_SETUP, M_FALLBACK, M_RECOVERY, M_NO_ID };
 const char *const MODE_NAMES[] = {"normal", "setup", "fallback", "recovery", "no-identity"};
 
 const char *const CONFIG_FILE = "/unit.cfg", *const TRY_FILE = "/wifi.try", *const BOOTS_FILE = "/boots",
-                  *const BACKUP_FILE = "/backup.txt", *const MODEL_FILE = "/is3036";
+                  *const BACKUP_FILE = "/backup.txt", *const MODEL_FILE = "/is3036",
+                  *const JOIN_FILE = "/join.fail";
 extern "C" uint8_t _EEPROM_start;         // the flash's last sector; the factory's page is at its start
 
 unit::Identity   identity;
@@ -190,6 +196,7 @@ uint32_t       announcedAt = 0, lastElection = 0;
 void announceUnit();
 char     apSsid[32] = "";
 char     lastError[80] = "";
+char     joinNote[48] = "", joinFail[112] = "";   // the last join that failed, and the one on file
 bool     fsOk = false, backupSaved = false, bootsCleared = false;
 bool     saved3036 = false, sawLongFrame = false;   // the 3036 answer on file, and a 51-byte frame waiting to be compared with it
 uint32_t apIdleSince = 0, rebootAt = 0, loginBlockedUntil = 0;
@@ -244,7 +251,9 @@ UdpLog Log;
 void rebootNow(RebootWhy why, bool stall) {
   if (stall) SCRATCH_STALLS = SCRATCH_STALLS + 1;
   SCRATCH_TOTAL = SCRATCH_TOTAL + 1;
-  SCRATCH_BOOT = (SCRATCH_BOOT & 1) | ((uint32_t)why << 8);
+  uint32_t retries = (SCRATCH_BOOT & BOOT_RETRIES) >> 16;
+  if (why == RB_AP_IDLE && retries < 255) retries++;
+  SCRATCH_BOOT = (SCRATCH_BOOT & 1) | ((uint32_t)why << 8) | (retries << 16);
   Log.printf("REBOOT: %s\n", REBOOT_TEXT[why]);
   delay(200);
   rp2040.reboot();
@@ -502,6 +511,8 @@ bool joinWifi(const char *ssid, const char *pass) {
   uint32_t t0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < WIFI_JOIN_MS) delay(100);
   bool ok = WiFi.status() == WL_CONNECTED;
+  if (!ok) snprintf(joinNote, sizeof(joinNote), "status %d, link %d, %lu ms", (int)WiFi.status(), cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA),
+                    (unsigned long)(millis() - t0));
   Log.printf("join %s: %s, %s, RSSI %d dBm, %lu ms\n", ssid, ok ? "ok" : "failed", WiFi.localIP().toString().c_str(), WiFi.RSSI(),
              (unsigned long)(millis() - t0));
   return ok;
@@ -536,9 +547,27 @@ void scanNetworks() {
   WiFi.scanDelete();
 }
 
+// The saved WiFi did not join. Keeps the first failure of a run on file, with what the scan saw of that network.
+void noteJoinFailure() {
+  int seen = -1;
+  for (int k = 0; k < nNetworks; k++) if (!strcmp(networks[k].ssid, cfg.ssid)) seen = k;
+  char line[sizeof(joinFail)];
+  if (seen >= 0) snprintf(line, sizeof(line), "%s; %.32s seen at %d dBm; boot %s", joinNote, cfg.ssid, networks[seen].rssi, REBOOT_TEXT[lastBoot]);
+  else snprintf(line, sizeof(line), "%s; %.32s not seen among %d networks; boot %s", joinNote, cfg.ssid, nNetworks, REBOOT_TEXT[lastBoot]);
+  Log.printf("saved WiFi did not join: %s\n", line);
+  if (!fsOk || (SCRATCH_BOOT & BOOT_RETRIES)) return;
+  strcpy(joinFail, line);
+  File f = LittleFS.open(JOIN_FILE, "w");
+  if (f) {
+    f.print(line);
+    f.close();
+  }
+}
+
 void startSetupNetwork(Mode m) {
   mode = m;
   scanNetworks();                                  // before the AP: the radio cannot do both reliably
+  if (m == M_FALLBACK) noteJoinFailure();
   WiFi.end();
   snprintf(apSsid, sizeof(apSsid), "AirMaster-%s", identity.unitId);
   WiFi.mode(WIFI_AP);
@@ -580,6 +609,13 @@ void startNetwork(bool powerOn) {
   identity = unit::parseIdentity(&_EEPROM_start);
   loadUnit();
   backupSaved = fsOk && LittleFS.exists(BACKUP_FILE);
+  if (fsOk && LittleFS.exists(JOIN_FILE)) {
+    File f = LittleFS.open(JOIN_FILE, "r");
+    if (f) {
+      joinFail[f.readBytes(joinFail, sizeof(joinFail) - 1)] = 0;
+      f.close();
+    }
+  }
   saved3036 = fsOk && LittleFS.exists(MODEL_FILE);
   if (saved3036) parser.recall3036();          // the short frames cannot tell a 3036 from a 3642
 #ifndef HOSTNAME
@@ -626,6 +662,7 @@ void startNetwork(bool powerOn) {
 
   if (WiFi.status() == WL_CONNECTED) {
     mode = M_NORMAL;
+    SCRATCH_BOOT &= ~BOOT_RETRIES;
     server.begin();
     if (MDNS.begin(hostLabel)) {
       MDNS.addService("http", "tcp", 80);
@@ -754,11 +791,14 @@ void serviceNetwork(uint32_t now) {
       dns.processNextRequest();
       break;
     case M_FALLBACK:
-    case M_RECOVERY:
+    case M_RECOVERY: {
       dns.processNextRequest();
+      uint32_t retries = (SCRATCH_BOOT & BOOT_RETRIES) >> 16, idle = AP_IDLE_MS;
+      if (mode == M_FALLBACK && retries < sizeof(FALLBACK_IDLE_MS) / sizeof(FALLBACK_IDLE_MS[0])) idle = FALLBACK_IDLE_MS[retries];
       if (WiFi.softAPgetStationNum() > 0) apIdleSince = now;
-      else if (now - apIdleSince > AP_IDLE_MS) rebootNow(RB_AP_IDLE, false);
+      else if (now - apIdleSince > idle) rebootNow(RB_AP_IDLE, false);
       break;
+    }
     case M_NO_ID:
       break;
   }
@@ -1061,6 +1101,7 @@ void infoJson(char *b, size_t len, const HttpRequest &r, uint32_t now) {
   n = apStr(b, n, len, "ip", WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "");
   n = apStr(b, n, len, "error", lastError);
   n = apStr(b, n, len, "last_boot", REBOOT_TEXT[lastBoot]);
+  n = apStr(b, n, len, "join_fail", joinFail);
   n = ap(b, n, len, "\"reboots\":%lu,\"model\":%u,", (unsigned long)SCRATCH_TOTAL,
          haveFrame && millis() - lastFrameMs < SCB_REPORT_MS ? parser.status.model : 0);
   n = ap(b, n, len, "\"admin\":%d,\"wifi\":%d,\"logged_in\":%d,\"cal\":%d,\"by_order\":%d,\"backup\":%d,", cfg.hasAdmin() ? 1 : 0, cfg.hasWifi() ? 1 : 0,
@@ -1414,7 +1455,7 @@ void setup() {
     uint8_t why = (SCRATCH_BOOT >> 8) & 0xFF;
     lastBoot = why < RB_COUNT ? why : RB_RESET;
   }
-  SCRATCH_BOOT &= 1;
+  SCRATCH_BOOT &= BOOT_RETRIES | 1;
   Serial1.begin(115200);
   analogWriteFreq(1000);                   // 1 kHz shows no flicker
   analogWriteRange(unit::LED_PWM_RANGE);
@@ -1431,7 +1472,7 @@ void setup() {
   Wire.begin();
 
   bool powerOn = SCRATCH_BOOT & 1;
-  SCRATCH_BOOT = 0;
+  SCRATCH_BOOT &= BOOT_RETRIES;
   startNetwork(powerOn);
 
   bool ds = bus.begin();

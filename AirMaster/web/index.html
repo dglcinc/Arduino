@@ -78,7 +78,7 @@ function renderSetup(){
   main.replaceChildren();
   const fresh=info.mode==="setup";
   if(info.error)main.append(msg(info.error,"bad"));
-  if(info.mode==="fallback")main.append(msg("This AirMaster cannot reach its saved WiFi. It will try again by itself after 10 minutes with nobody connected here. Change the network below if it has changed."));
+  if(info.mode==="fallback")main.append(msg("This AirMaster cannot reach its saved WiFi. With nobody connected here it tries again by itself, after a minute at first and every 10 minutes later. Change the network below if it has changed."));
   if(info.mode==="recovery")main.append(msg("Recovery. Saving here sets the admin password back to the one on the label. Leave a field blank to keep what is saved."));
   const nets=$("select",{},$("option",{value:"",textContent:"Choose a network"}));
   for(const n of info.networks.slice().sort((a,b)=>b.rssi-a.rssi))nets.append($("option",{value:n.ssid,textContent:n.ssid+" ("+bars(n.rssi)+(n.open?", open":"")+")"}));

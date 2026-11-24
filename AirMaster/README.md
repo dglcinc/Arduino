@@ -47,7 +47,7 @@ The ledger, `~/.config/airmaster/units.csv`, and the PDFs hold every password. T
 3. Choose the home WiFi and name the unit. The password on the label is also the password for changing settings; the Unit tab changes it.
 4. The unit restarts onto the home WiFi. Open `http://<name>.local`.
 
-If the join fails, the setup network returns within about a minute and its page gives the reason. If the unit loses its WiFi later, the setup network comes up until someone uses it or 10 minutes pass with nobody on it, then the unit tries again. For a forgotten password, power it off and on three times, within 30 seconds each, join the setup network and save: the password goes back to the one on the label.
+If the join fails, the setup network returns within about a minute and its page gives the reason. If the unit cannot join its saved WiFi, at power-up or after losing it, the setup network comes up until someone uses it. With nobody on it the unit tries the saved WiFi again after 1 minute, then 1, 2 and 5 minutes, then every 10. `/api/info` keeps the first failure of each run as `join_fail`: the radio's status, whether the scan saw the network and at what signal, and why the unit had booted. For a forgotten password, power it off and on three times, within 30 seconds each, join the setup network and save: the password goes back to the one on the label.
 
 
 With more than one AirMaster on the network, each one's page shows a tile for every unit under its name, with the unit's type, the call in force and the blower's airflow and speed, and a tap on a tile opens that unit. The tiles run across the top of a wide screen and stack on a phone. Each page reads the other units' `/data` lines for them, which every unit allows from another origin. Also,
