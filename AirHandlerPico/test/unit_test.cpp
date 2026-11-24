@@ -150,6 +150,14 @@ int main(int argc, char **argv) {
     assert(groupAccept(b2, a.salt, a.hash, proof) == GT_REFUSED);    // the old password cannot come back
     groupId(b2, id);
     assert(groupOffer(b, id) == GO_NOTHING);                         // nor does the stale unit push it forward
+    char joined[HASH_HEX + 1], got[40];                              // the same password typed on another unit joins the group
+    groupId(a2, id);
+    assert(groupSamePassword("second one", a2.salt, id, joined) && !strcmp(joined, a2.hash));
+    assert(!groupSamePassword("second 0ne", a2.salt, id, joined) && !groupSamePassword("second one", "zz", id, joined));
+    assert(!groupSamePassword("second one", a2.salt, "-", joined));
+    assert(jsonText("{\"id\":\"0a1b2c3d\",\"salt\":\"ff\"}\r\n", "id", got, sizeof(got)) && !strcmp(got, "0a1b2c3d"));
+    assert(jsonText("{\"id\":\"0a1b2c3d\",\"salt\":\"ff\"}", "salt", got, sizeof(got)) && !strcmp(got, "ff"));
+    assert(!jsonText("{\"id\":\"-\"}", "salt", got, sizeof(got)) && !jsonText("{\"id\":\"0123456789\"}", "id", got, 9));
     UnitConfig other;                                                // a unit with an unrelated password is left alone
     strcpy(other.salt, a.salt);
     hashPassword("someone else's", other.salt, other.hash);

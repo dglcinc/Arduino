@@ -493,12 +493,38 @@ void randomHex(char *out, size_t bytes) {
   unit::toHex(r, bytes, out);
 }
 
+int peerHttp(const uint8_t ip[4], const char *method, const char *path, const char *form, char *out, size_t outLen);
+
+// Whether another unit already holds pw. If one does, this unit takes its salt and hash, and so joins its group.
+bool joinGroup(const char *pw) {
+  if (mode != M_NORMAL || WiFi.status() != WL_CONNECTED) return false;
+  char tried[unit::GROUP_ID_HEX + 1] = "";
+  for (int i = 0; i < nPeers; i++) {
+    char answer[160], id[unit::GROUP_ID_HEX + 1], salt[unit::SALT_HEX + 1], hash[unit::HASH_HEX + 1];
+    if (peerHttp(peers[i].ip, "GET", "/api/group", "", answer, sizeof(answer)) != 200) continue;
+    if (!unit::jsonText(answer, "id", id, sizeof(id)) || !unit::jsonText(answer, "salt", salt, sizeof(salt))) continue;
+    if (!strcmp(id, tried)) continue;              // units of one group answer alike: hash once
+    strcpy(tried, id);
+    rp2040.wdt_reset();
+    bool same = unit::groupSamePassword(pw, salt, id, hash);
+    rp2040.wdt_reset();
+    if (!same) continue;
+    strcpy(cfg.salt, salt);
+    strcpy(cfg.hash, hash);
+    Log.printf("password matches %s: joined its group\n", peers[i].serial[0] ? peers[i].serial : "another unit");
+    return true;
+  }
+  return false;
+}
+
 // Set on this unit's own page. The other units are offered it within seconds (serviceGroup).
 void setAdminPassword(const char *pw) {
   if (cfg.hasAdmin()) strcpy(cfg.prev, cfg.hash);
   cfg.solo = false;
-  randomHex(cfg.salt, unit::SALT_HEX / 2);
-  unit::hashPassword(pw, cfg.salt, cfg.hash);
+  if (!joinGroup(pw)) {
+    randomHex(cfg.salt, unit::SALT_HEX / 2);
+    unit::hashPassword(pw, cfg.salt, cfg.hash);
+  }
   groupAt = 0;
   groupNext = millis() + GROUP_SOON_MS;
 }
@@ -794,15 +820,9 @@ void serviceGroup(uint32_t now) {
   }
   const unit::Peer p = peers[groupAt++];
   groupNext = now + GROUP_STEP_MS;
-  char answer[96], id[unit::GROUP_ID_HEX + 1] = "";
+  char answer[160], id[unit::GROUP_ID_HEX + 1] = "";
   if (peerHttp(p.ip, "GET", "/api/group", "", answer, sizeof(answer)) != 200) return;   // off, or firmware before 1.2.6
-  const char *v = strstr(answer, "\"id\":\"");
-  if (!v) return;
-  v += 6;
-  size_t n = strcspn(v, "\"");
-  if (n > unit::GROUP_ID_HEX) return;
-  memcpy(id, v, n);
-  id[n] = 0;
+  if (!unit::jsonText(answer, "id", id, sizeof(id))) return;
   unit::GroupOffer offer = unit::groupOffer(cfg, id);
   if (offer == unit::GO_NOTHING) return;
   char form[unit::SALT_HEX + 2 * unit::HASH_HEX + 24], proof[unit::HASH_HEX + 1] = "";
@@ -1399,7 +1419,8 @@ int route(WiFiClient &c, const HttpRequest &r, char *form, char *body, size_t le
     if (!strcmp(t, "/api/group")) {
       char id[unit::GROUP_ID_HEX + 1];
       unit::groupId(cfg, id);
-      snprintf(body, len, "{\"id\":\"%s\"}", id);
+      if (cfg.hasAdmin()) snprintf(body, len, "{\"id\":\"%s\",\"salt\":\"%s\"}", id, cfg.salt);
+      else snprintf(body, len, "{\"id\":\"%s\"}", id);
       return 200;
     }
     if (!strcmp(t, "/")) return 0;                 // the page

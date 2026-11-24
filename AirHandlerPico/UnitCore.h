@@ -398,8 +398,9 @@ inline bool loadConfig(char *text, UnitConfig &out) {
 // --- the group password ---------------------------------------------------------------------------
 // Units on one network share an admin password. A unit that has one offers its salt and hash to the others: a unit with
 // none takes the first offered, and a unit with one takes a change only with proof that the sender held the hash it holds
-// now. A unit whose password recovery cleared takes none until one is set on its own page. The hash crosses the network
-// as the password does at login: without TLS.
+// now. A unit whose password recovery cleared takes none until one is set on its own page. A password typed on a unit's
+// page that another unit already holds joins that unit's group. The hash crosses the network as the password does at
+// login: without TLS.
 
 const size_t GROUP_ID_HEX = 8;
 const char *const GROUP_OPEN = "-", *const GROUP_SOLO = "x";
@@ -438,6 +439,30 @@ inline bool lowerHex(const char *s, size_t n) {
   if (strlen(s) != n) return false;
   for (size_t i = 0; i < n; i++)
     if (!((s[i] >= '0' && s[i] <= '9') || (s[i] >= 'a' && s[i] <= 'f'))) return false;
+  return true;
+}
+
+// Whether pw is the password another unit holds, from the salt and id it answers with. On a match hashOut is its hash,
+// so a password typed on this unit's page joins that unit's group in place of starting another.
+inline bool groupSamePassword(const char *pw, const char *peerSalt, const char *peerId, char hashOut[HASH_HEX + 1]) {
+  if (!lowerHex(peerSalt, SALT_HEX) || strlen(peerId) != GROUP_ID_HEX) return false;
+  char id[GROUP_ID_HEX + 1];
+  hashPassword(pw, peerSalt, hashOut);
+  groupIdOfHash(hashOut, id);
+  return !strcmp(id, peerId);
+}
+
+// The text of a "key":"value" pair in a unit's short JSON answer. False when absent or too long for out.
+inline bool jsonText(const char *json, const char *key, char *out, size_t outLen) {
+  char pat[24];
+  snprintf(pat, sizeof(pat), "\"%s\":\"", key);
+  const char *v = strstr(json, pat);
+  if (!v) return false;
+  v += strlen(pat);
+  size_t n = strcspn(v, "\"");
+  if (n >= outLen) return false;
+  memcpy(out, v, n);
+  out[n] = 0;
   return true;
 }
 
