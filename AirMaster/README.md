@@ -49,6 +49,14 @@ The ledger, `~/.config/airmaster/units.csv`, and the PDFs hold every password. T
 
 If the join fails, the setup network returns within about a minute and its page gives the reason. If the unit cannot join its saved WiFi, at power-up or after losing it, the setup network comes up until someone uses it. With nobody on it the unit tries the saved WiFi again after 1 minute, then 1, 2 and 5 minutes, then every 10. `/api/info` keeps the first failure of each run as `join_fail`: the radio's status, whether the scan saw the network and at what signal, and why the unit had booted. For a forgotten password, power it off and on three times, within 30 seconds each, join the setup network and save: the password goes back to the one on the label.
 
+The admin password is shared. A unit that has one offers it to the other AirMasters it hears: within seconds of a change on its page, and every 5 minutes after. A unit with no admin password takes the first one offered. A unit that has one takes a change only from a unit that held the same password before, so a unit with an unrelated password is left alone. The label's password still opens a unit that has taken none. Three limits follow from this:
+
+- A unit off the network through two changes keeps the password it had. Log in to it with that password and set the new one there.
+- The same password typed on two units by hand makes two separate groups, since each unit salts it differently; a later change on one does not reach the other. Set a password on one unit and let the others take it.
+- After the forgotten-password recovery a unit takes no password from the others until one is set on its own page, or the others would hand the forgotten one back. Recover each unit and set the new password on each.
+
+The units exchange the password's salt and hash over the home network without TLS, as a browser sends the password itself at login. Any device on that network can give a password to a unit that has none; recovery undoes it.
+
 
 With more than one AirMaster on the network, each one's page shows a tile for every unit under its name, with the unit's type, the call in force and the blower's airflow and speed, and a tap on a tile opens that unit. The tiles run across the top of a wide screen and stack on a phone. Each page reads the other units' `/data` lines for them, which every unit allows from another origin. Also,
 

@@ -188,6 +188,10 @@ MDNSResponder::hMDNSService      amService = nullptr;
 MDNSResponder::hMDNSServiceQuery amQuery = nullptr;
 const int      MAX_PEERS = 16;
 const uint32_t ELECT_EVERY_MS = 20000, ELECT_SETTLE_MS = 45000;   // the settle lets the first answers arrive
+const uint32_t GROUP_EVERY_MS = 300000, GROUP_SOON_MS = 3000, GROUP_STEP_MS = 500;   // a round of the other units, and one unit of it
+const uint32_t GROUP_HTTP_MS  = 1500;     // each of connecting to another unit and its answer; well inside WDT_MS
+uint32_t       groupNext = 0;
+int            groupAt = 0;
 unit::Peer     peers[MAX_PEERS];
 int            nPeers = 0;
 bool           leading = false;
@@ -489,9 +493,14 @@ void randomHex(char *out, size_t bytes) {
   unit::toHex(r, bytes, out);
 }
 
+// Set on this unit's own page. The other units are offered it within seconds (serviceGroup).
 void setAdminPassword(const char *pw) {
+  if (cfg.hasAdmin()) strcpy(cfg.prev, cfg.hash);
+  cfg.solo = false;
   randomHex(cfg.salt, unit::SALT_HEX / 2);
   unit::hashPassword(pw, cfg.salt, cfg.hash);
+  groupAt = 0;
+  groupNext = millis() + GROUP_SOON_MS;
 }
 
 void useSavedProbes() {
@@ -662,6 +671,7 @@ void startNetwork(bool powerOn) {
 
   if (WiFi.status() == WL_CONNECTED) {
     mode = M_NORMAL;
+    groupNext = millis() + ELECT_SETTLE_MS + ELECT_EVERY_MS;   // once the other units have been heard
     SCRATCH_BOOT &= ~BOOT_RETRIES;
     server.begin();
     if (MDNS.begin(hostLabel)) {
@@ -744,6 +754,64 @@ void electLeader(uint32_t now) {
   }
 }
 
+// --- the group password: offered to the other units ---------------------------------------------------------------
+
+// One request to another unit. Returns its HTTP status, 0 when it did not answer; its JSON lands in out.
+int peerHttp(const uint8_t ip[4], const char *method, const char *path, const char *form, char *out, size_t outLen) {
+  static char buf[512];
+  WiFiClient c;
+  out[0] = 0;
+  rp2040.wdt_reset();
+  c.setTimeout(GROUP_HTTP_MS);
+  if (!c.connect(IPAddress(ip[0], ip[1], ip[2], ip[3]), 80)) return 0;
+  rp2040.wdt_reset();
+  c.printf("%s %s HTTP/1.1\r\nHost: %u.%u.%u.%u\r\nX-AirMaster: 1\r\nConnection: close\r\n"
+           "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: %u\r\n\r\n%s",
+           method, path, ip[0], ip[1], ip[2], ip[3], (unsigned)strlen(form), form);
+  size_t n = 0;
+  uint32_t start = millis();
+  while (n < sizeof(buf) - 1 && millis() - start < GROUP_HTTP_MS && (c.connected() || c.available())) {
+    serviceUsb(millis());
+    if (c.available()) buf[n++] = (char)c.read();
+  }
+  buf[n] = 0;
+  c.stop();
+  rp2040.wdt_reset();
+  if (strncmp(buf, "HTTP/1.", 7) || n < 12) return 0;
+  const char *body = strstr(buf, "\r\n\r\n");
+  if (body) snprintf(out, outLen, "%s", body + 4);
+  return atoi(buf + 9);
+}
+
+// Asks one other unit a pass which password it holds, and offers this unit's where the rules allow (UnitCore.h).
+// A round covers every unit heard; rounds are GROUP_EVERY_MS apart, and one starts soon after a change here.
+void serviceGroup(uint32_t now) {
+  if (!cfg.hasAdmin() || (int32_t)(now - groupNext) < 0) return;
+  if (groupAt >= nPeers) {
+    groupAt = 0;
+    groupNext = now + GROUP_EVERY_MS;
+    return;
+  }
+  const unit::Peer p = peers[groupAt++];
+  groupNext = now + GROUP_STEP_MS;
+  char answer[96], id[unit::GROUP_ID_HEX + 1] = "";
+  if (peerHttp(p.ip, "GET", "/api/group", "", answer, sizeof(answer)) != 200) return;   // off, or firmware before 1.2.6
+  const char *v = strstr(answer, "\"id\":\"");
+  if (!v) return;
+  v += 6;
+  size_t n = strcspn(v, "\"");
+  if (n > unit::GROUP_ID_HEX) return;
+  memcpy(id, v, n);
+  id[n] = 0;
+  unit::GroupOffer offer = unit::groupOffer(cfg, id);
+  if (offer == unit::GO_NOTHING) return;
+  char form[unit::SALT_HEX + 2 * unit::HASH_HEX + 24], proof[unit::HASH_HEX + 1] = "";
+  if (offer == unit::GO_PROVE) unit::groupProof(cfg.prev, cfg.salt, cfg.hash, proof);
+  snprintf(form, sizeof(form), "salt=%s&hash=%s&proof=%s", cfg.salt, cfg.hash, proof);
+  int code = peerHttp(p.ip, "POST", "/api/group", form, answer, sizeof(answer));
+  Log.printf("group password offered to %s: %d\n", p.serial[0] ? p.serial : "a unit", code);
+}
+
 void serviceNetwork(uint32_t now) {
   if (rebootAt && (int32_t)(now - rebootAt) >= 0) rebootNow(RB_REQUESTED, false);
   if (!bootsCleared && now > BOOT_WINDOW_MS) {     // a power-up that lasted: the count starts again
@@ -780,6 +848,7 @@ void serviceNetwork(uint32_t now) {
       electLeader(now);
       if (WiFi.status() == WL_CONNECTED) {
         wifiDown = false;
+        serviceGroup(now);
       } else if (!wifiDown) {
         wifiDown = true;
         wifiLostAt = now;
@@ -1102,6 +1171,9 @@ void infoJson(char *b, size_t len, const HttpRequest &r, uint32_t now) {
   n = apStr(b, n, len, "error", lastError);
   n = apStr(b, n, len, "last_boot", REBOOT_TEXT[lastBoot]);
   n = apStr(b, n, len, "join_fail", joinFail);
+  char group[unit::GROUP_ID_HEX + 1];
+  unit::groupId(cfg, group);
+  n = apStr(b, n, len, "group", group);
   n = ap(b, n, len, "\"reboots\":%lu,\"model\":%u,", (unsigned long)SCRATCH_TOTAL,
          haveFrame && millis() - lastFrameMs < SCB_REPORT_MS ? parser.status.model : 0);
   n = ap(b, n, len, "\"admin\":%d,\"wifi\":%d,\"logged_in\":%d,\"cal\":%d,\"by_order\":%d,\"backup\":%d,", cfg.hasAdmin() ? 1 : 0, cfg.hasWifi() ? 1 : 0,
@@ -1166,6 +1238,33 @@ int startJob(char *form, char *body, size_t len, uint32_t now) {
 
 bool validPassword(const char *pw) { return strlen(pw) >= 8; }
 
+// Another unit's offer. No login: the rules in UnitCore.h decide, and a refusal costs the sender the login delay.
+int postGroup(const char *form, char *body, size_t len, uint32_t now) {
+  if (mode != M_NORMAL || !identity.valid) return jobError(body, len, 403, "not now");
+  if ((int32_t)(loginBlockedUntil - now) > 0) return jobError(body, len, 429, "Wait a moment and try again.");
+  char salt[unit::SALT_HEX + 1] = "", hash[unit::HASH_HEX + 1] = "", proof[unit::HASH_HEX + 1] = "";
+  unit::formGet(form, "salt", salt, sizeof(salt));
+  unit::formGet(form, "hash", hash, sizeof(hash));
+  unit::formGet(form, "proof", proof, sizeof(proof));
+  unit::UnitConfig before = cfg;
+  unit::GroupTaken taken = unit::groupAccept(cfg, salt, hash, proof);
+  if (taken == unit::GT_REFUSED) {
+    loginBlockedUntil = millis() + LOGIN_DELAY_MS;
+    return jobError(body, len, 403, "refused");
+  }
+  if (taken == unit::GT_TAKEN) {
+    if (!saveUnit()) {
+      cfg = before;
+      return jobError(body, len, 500, "could not save");
+    }
+    groupAt = 0;                                   // pass it on to units this one hears and the sender may not
+    groupNext = millis() + GROUP_SOON_MS;
+    Log.println("group password taken from another unit");
+  }
+  snprintf(body, len, "{\"ok\":1}");
+  return 200;
+}
+
 // The first-setup form, and the same form on recovery or fallback, where a blank field keeps what is saved.
 int postSetup(const char *form, char *body, size_t len, uint32_t now) {
   if (mode == M_NORMAL) return jobError(body, len, 403, "setup is only open on the unit's own network");
@@ -1180,8 +1279,9 @@ int postSetup(const char *form, char *body, size_t len, uint32_t now) {
   if (hasName && name[0]) strcpy(cfg.name, name);
   if (hasAdmin) {
     setAdminPassword(admin);
-  } else if (mode == M_RECOVERY && cfg.hasAdmin()) {   // the owner forgot it: the label's password works again
-    cfg.salt[0] = cfg.hash[0] = 0;
+  } else if (mode == M_RECOVERY && cfg.hasAdmin()) {   // the owner forgot it: the label's password works again,
+    cfg.salt[0] = cfg.hash[0] = cfg.prev[0] = 0;       // and the other units do not hand the forgotten one back
+    cfg.solo = true;
   }
   if (!saveUnit()) return jobError(body, len, 500, "could not save");
   if (hasSsid) {
@@ -1296,6 +1396,12 @@ int route(WiFiClient &c, const HttpRequest &r, char *form, char *body, size_t le
     if (!strcmp(t, "/settings")) { settingsJson(body, len, now); return 200; }
     if (!strcmp(t, "/api/info")) { infoJson(body, len, r, now); return 200; }
     if (!strcmp(t, "/api/units")) { unitsJson(body, len); return 200; }
+    if (!strcmp(t, "/api/group")) {
+      char id[unit::GROUP_ID_HEX + 1];
+      unit::groupId(cfg, id);
+      snprintf(body, len, "{\"id\":\"%s\"}", id);
+      return 200;
+    }
     if (!strcmp(t, "/")) return 0;                 // the page
     return jobError(body, len, 404, "not found");
   }
@@ -1303,6 +1409,7 @@ int route(WiFiClient &c, const HttpRequest &r, char *form, char *body, size_t le
   if (!r.markedApi) return jobError(body, len, 403, "use the AirMaster page");
 
   if (!strcmp(t, "/api/setup")) return postSetup(form, body, len, now);
+  if (!strcmp(t, "/api/group")) return postGroup(form, body, len, now);
   if (!strcmp(t, "/api/login")) {
     if ((int32_t)(loginBlockedUntil - now) > 0) return jobError(body, len, 429, "Wait a moment and try again.");
     char pw[64] = "", hash[unit::HASH_HEX + 1];

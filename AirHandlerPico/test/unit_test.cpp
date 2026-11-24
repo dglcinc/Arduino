@@ -32,6 +32,11 @@ static int vectors() {
   hashPassword("hunter2 pw", "00112233445566778899aabbccddeeff", hex);
   printf("pw %s\n", hex);
   printf("crc %08x\n", crc32((const uint8_t *)"123456789", 9));
+  char id[GROUP_ID_HEX + 1];
+  groupIdOfHash("aa55", id);
+  printf("gid %s\n", id);
+  groupProof("aa55", "0011", "bb66", hex);
+  printf("gproof %s\n", hex);
   return 0;
 }
 
@@ -105,7 +110,51 @@ int main(int argc, char **argv) {
     memset(m.mqttHost, 'd', 63);
     memset(m.mqttUser, 'e', 32);
     memset(m.mqttPass, 'f', 63);
+    memset(m.salt, '0', SALT_HEX);
+    memset(m.hash, '1', HASH_HEX);
+    memset(m.prev, '2', HASH_HEX);
+    m.solo = true;
     assert(saveConfig(m, maxed, sizeof(maxed)) < sizeof(maxed));
+    UnitConfig back;
+    assert(loadConfig(maxed, back) && !strcmp(back.prev, m.prev) && back.solo);
+    assert(!older.prev[0] && !older.solo);          // a file from before the group password
+  }
+  { // the group password
+    UnitConfig a, b, c, d;
+    char id[GROUP_ID_HEX + 1], ida[GROUP_ID_HEX + 1], proof[HASH_HEX + 1];
+    groupId(b, id);
+    assert(!strcmp(id, "-") && groupOffer(a, id) == GO_NOTHING);     // nobody has a password: nothing moves
+    strcpy(a.salt, "00112233445566778899aabbccddeeff");
+    hashPassword("first one", a.salt, a.hash);
+    groupId(a, ida);
+    assert(strlen(ida) == GROUP_ID_HEX && groupOffer(a, id) == GO_OPEN && groupOffer(a, ida) == GO_NOTHING);
+    assert(groupAccept(b, a.salt, a.hash, "") == GT_TAKEN && !strcmp(b.hash, a.hash) && !b.prev[0]);
+    assert(groupAccept(b, a.salt, a.hash, "") == GT_SAME);
+    assert(groupAccept(c, "zz", a.hash, "") == GT_REFUSED && groupAccept(c, a.salt, "ABCD", "") == GT_REFUSED && !c.hasAdmin());
+    d.solo = true;                                                   // recovered: takes none, and says so
+    groupId(d, id);
+    assert(!strcmp(id, "x") && groupOffer(a, id) == GO_NOTHING && groupAccept(d, a.salt, a.hash, "") == GT_REFUSED);
+    // a changes its password: b, still on the old one, takes it with proof and nothing else
+    UnitConfig a2 = a;
+    strcpy(a2.prev, a.hash);
+    strcpy(a2.salt, "ffeeddccbbaa99887766554433221100");
+    hashPassword("second one", a2.salt, a2.hash);
+    groupId(b, id);
+    assert(groupOffer(a2, id) == GO_PROVE);
+    assert(groupAccept(b, a2.salt, a2.hash, "") == GT_REFUSED && !strcmp(b.hash, a.hash));
+    groupProof("0000", a2.salt, a2.hash, proof);
+    assert(groupAccept(b, a2.salt, a2.hash, proof) == GT_REFUSED);
+    groupProof(a2.prev, a2.salt, a2.hash, proof);
+    UnitConfig b2 = b;
+    assert(groupAccept(b2, a2.salt, a2.hash, proof) == GT_TAKEN && !strcmp(b2.hash, a2.hash) && !strcmp(b2.prev, a.hash));
+    assert(groupAccept(b2, a.salt, a.hash, proof) == GT_REFUSED);    // the old password cannot come back
+    groupId(b2, id);
+    assert(groupOffer(b, id) == GO_NOTHING);                         // nor does the stale unit push it forward
+    UnitConfig other;                                                // a unit with an unrelated password is left alone
+    strcpy(other.salt, a.salt);
+    hashPassword("someone else's", other.salt, other.hash);
+    groupId(other, id);
+    assert(groupOffer(a2, id) == GO_NOTHING && groupAccept(other, a2.salt, a2.hash, proof) == GT_REFUSED);
   }
   { // forms
     char out[33];

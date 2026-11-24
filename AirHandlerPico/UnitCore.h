@@ -314,6 +314,8 @@ struct UnitConfig {
   char  name[33] = "";
   char  salt[SALT_HEX + 1] = "";
   char  hash[HASH_HEX + 1] = "";
+  char  prev[HASH_HEX + 1] = "";              // the hash before the last change, which proves the change to units still on it
+  bool  solo = false;                         // recovery cleared the password: take none from another unit
   uint8_t romSup[8] = {0}, romRet[8] = {0};   // zero: the first two probes in search order
   float offWsup = 0, offWret = 0, offAsup = 0, offAret = 0;   // degrees F, added to the reading
   char  mqttHost[64] = "";                    // empty: MQTT off
@@ -339,9 +341,9 @@ inline size_t saveConfig(const UnitConfig &c, char *b, size_t len) {
   toHex((const uint8_t *)c.name, strlen(c.name), name);
   toHex(c.romSup, 8, ra);
   toHex(c.romRet, 8, rb);
-  return snprintf(b, len, "v=1\nssid=%s\npass=%s\nname=%s\nsalt=%s\nhash=%s\nromsup=%s\nromret=%s\noffwsup=%.3f\noffwret=%.3f\noffasup=%.3f\noffaret=%.3f\nmh=%s\nmu=%s\nmp=%s\nmport=%u\nmw=%d\nled=%u\n",
+  return snprintf(b, len, "v=1\nssid=%s\npass=%s\nname=%s\nsalt=%s\nhash=%s\nromsup=%s\nromret=%s\noffwsup=%.3f\noffwret=%.3f\noffasup=%.3f\noffaret=%.3f\nmh=%s\nmu=%s\nmp=%s\nmport=%u\nmw=%d\nled=%u\nprev=%s\nsolo=%d\n",
                   ssid, pass, name, c.salt, c.hash, ra, rb, c.offWsup, c.offWret, c.offAsup, c.offAret, mh, mu, mp, c.mqttPort, c.mqttWrites ? 1 : 0,
-                  (unsigned)c.ledPct);
+                  (unsigned)c.ledPct, c.prev, c.solo ? 1 : 0);
 }
 
 inline bool hexField(const char *v, char *out, size_t outLen) {
@@ -383,12 +385,95 @@ inline bool loadConfig(char *text, UnitConfig &out) {
     else if (!strcmp(k, "mp")) ok = hexField(v, c.mqttPass, sizeof(c.mqttPass));
     else if (!strcmp(k, "mport")) c.mqttPort = (unsigned)strtoul(v, nullptr, 10);
     else if (!strcmp(k, "mw")) c.mqttWrites = v[0] == '1';
+    else if (!strcmp(k, "prev")) { ok = strlen(v) <= HASH_HEX; if (ok) strcpy(c.prev, v); }
+    else if (!strcmp(k, "solo")) c.solo = v[0] == '1';
     else if (!strcmp(k, "led")) { unsigned long p = strtoul(v, nullptr, 10); c.ledPct = (uint8_t)(p > 100 ? 100 : p); }
     if (!ok) return false;
   }
   if (!sawVersion) return false;
   out = c;
   return true;
+}
+
+// --- the group password ---------------------------------------------------------------------------
+// Units on one network share an admin password. A unit that has one offers its salt and hash to the others: a unit with
+// none takes the first offered, and a unit with one takes a change only with proof that the sender held the hash it holds
+// now. A unit whose password recovery cleared takes none until one is set on its own page. The hash crosses the network
+// as the password does at login: without TLS.
+
+const size_t GROUP_ID_HEX = 8;
+const char *const GROUP_OPEN = "-", *const GROUP_SOLO = "x";
+
+// A short name for a saved password, so two units can tell whether they hold the same one.
+inline void groupIdOfHash(const char *hash, char out[GROUP_ID_HEX + 1]) {
+  uint8_t d[32];
+  Sha256 h;
+  h.add("airmaster-group-id|", 19);
+  h.add(hash, strlen(hash));
+  h.finish(d);
+  toHex(d, GROUP_ID_HEX / 2, out);
+}
+
+// What a unit answers on GET /api/group: its password's name, "-" with none, "x" with none and taking none.
+inline void groupId(const UnitConfig &c, char out[GROUP_ID_HEX + 1]) {
+  if (c.hasAdmin()) groupIdOfHash(c.hash, out);
+  else strcpy(out, c.solo ? GROUP_SOLO : GROUP_OPEN);
+}
+
+// Proof that the sender of a new salt and hash held the hash the receiver holds now.
+inline void groupProof(const char *currentHash, const char *salt, const char *hash, char out[HASH_HEX + 1]) {
+  uint8_t d[32];
+  Sha256 h;
+  h.add("airmaster-group|", 16);
+  h.add(currentHash, strlen(currentHash));
+  h.add("|", 1);
+  h.add(salt, strlen(salt));
+  h.add("|", 1);
+  h.add(hash, strlen(hash));
+  h.finish(d);
+  toHex(d, 32, out);
+}
+
+inline bool lowerHex(const char *s, size_t n) {
+  if (strlen(s) != n) return false;
+  for (size_t i = 0; i < n; i++)
+    if (!((s[i] >= '0' && s[i] <= '9') || (s[i] >= 'a' && s[i] <= 'f'))) return false;
+  return true;
+}
+
+enum GroupOffer { GO_NOTHING, GO_OPEN, GO_PROVE };
+
+// What this unit sends a peer that answered peerId. GO_PROVE: the peer holds this unit's previous password.
+inline GroupOffer groupOffer(const UnitConfig &c, const char *peerId) {
+  if (!c.hasAdmin()) return GO_NOTHING;
+  char id[GROUP_ID_HEX + 1];
+  groupIdOfHash(c.hash, id);
+  if (!strcmp(peerId, id)) return GO_NOTHING;
+  if (!strcmp(peerId, GROUP_OPEN)) return GO_OPEN;
+  if (c.prev[0]) {
+    groupIdOfHash(c.prev, id);
+    if (!strcmp(peerId, id)) return GO_PROVE;
+  }
+  return GO_NOTHING;
+}
+
+enum GroupTaken { GT_REFUSED, GT_SAME, GT_TAKEN };
+
+// Takes an offered password into c, by the rules above. proof may be empty.
+inline GroupTaken groupAccept(UnitConfig &c, const char *salt, const char *hash, const char *proof) {
+  if (!lowerHex(salt, SALT_HEX) || !lowerHex(hash, HASH_HEX)) return GT_REFUSED;
+  if (c.hasAdmin()) {
+    if (sameText(hash, c.hash) && sameText(salt, c.salt)) return GT_SAME;
+    char want[HASH_HEX + 1];
+    groupProof(c.hash, salt, hash, want);
+    if (!sameText(proof, want)) return GT_REFUSED;
+    strcpy(c.prev, c.hash);
+  } else if (c.solo) {
+    return GT_REFUSED;
+  }
+  strcpy(c.salt, salt);
+  strcpy(c.hash, hash);
+  return GT_TAKEN;
 }
 
 }  // namespace unit
