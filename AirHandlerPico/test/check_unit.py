@@ -19,6 +19,10 @@ for line in out:
         for _ in range(5000):
             d = hashlib.sha256(d).digest()
         assert d.hex() == val, line
+    elif kind == "gid":
+        assert hashlib.sha256(b"airmaster-group-id|aa55").hexdigest()[:8] == val, line
+    elif kind == "gproof":
+        assert hashlib.sha256(b"airmaster-group|aa55|0011|bb66").hexdigest() == val, line
     elif kind == "crc":
         assert "%08x" % zlib.crc32(b"123456789") == val, line
     n += 1

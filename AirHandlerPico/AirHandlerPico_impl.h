@@ -18,7 +18,8 @@
 // Connecting. The factory writes each unit an identity holding its setup password (UnitCore.h). The unit starts its own
 // WiFi network, AirMaster-<unit id>, when:
 //   - it has no saved home WiFi: first setup. It stays up.
-//   - it cannot join its saved WiFi. It reboots to try again after 10 minutes with nobody connected.
+//   - it cannot join its saved WiFi. With nobody connected it reboots to try again after 1 minute, then 1, 2 and 5,
+//     then every 10. /api/info keeps the first failure of the run as join_fail.
 //   - it has been powered up three times within 30 s of each other: recovery, for a forgotten password. Same 10 minutes.
 // It tries a new home WiFi by rebooting onto it, since the radio holds one channel and a phone on the setup network would
 // drop anyway; a failure brings the setup network back with the reason. The readings carry on through all of this.
@@ -64,6 +65,7 @@
 #include <Wire.h>
 #include "hardware/gpio.h"
 #include "hardware/watchdog.h"
+#include <pico/cyw43_arch.h>
 #include <stdarg.h>
 #include <LittleFS.h>
 #include <LEAmDNS.h>
@@ -84,7 +86,7 @@
 #include "MqttDiscovery.h"
 #include "web_page.h"
 
-#define FW_VERSION "1.2.5"
+#define FW_VERSION "1.2.6"
 #define LOG_PORT 5515
 #ifndef ROM_WSUP
 #define ROM_WSUP { 0, 0, 0, 0, 0, 0, 0, 0 }
@@ -110,6 +112,7 @@ const uint32_t DS_PERIOD_MS    = 2000;
 const uint32_t RESCAN_MS       = 30000;
 const uint32_t HTTP_TIMEOUT_MS = 2000;
 const uint32_t AP_IDLE_MS      = 600000;   // setup network with nobody on it, when there is a saved WiFi to retry
+const uint32_t FALLBACK_IDLE_MS[] = {60000, 60000, 120000, 300000};   // the first retries of a saved WiFi come sooner
 const uint32_t BOOT_WINDOW_MS  = 30000;    // a power-up lasting less counts toward recovery
 const int      RECOVERY_BOOTS  = 3;
 const uint32_t LOGIN_DELAY_MS  = 2000;     // after a wrong password
@@ -128,7 +131,9 @@ const uint32_t SCRATCH_MAGIC = 0xA1B2C3D4;
 #define SCRATCH_STALLS watchdog_hw->scratch[1]    // stall restarts since the last frame, so a silent line restarts the unit once
 #define SCRATCH_TOTAL  watchdog_hw->scratch[2]    // reboots since power-on, on the node's line
 #define SCRATCH_BOOT   watchdog_hw->scratch[3]    // bit 0: this boot was a power-up, which counts toward recovery;
-                                                  // bits 8-15: why the firmware last rebooted (RebootWhy)
+                                                  // bits 8-15: why the firmware last rebooted (RebootWhy);
+                                                  // bits 16-23: retries of the saved WiFi since it last joined
+const uint32_t BOOT_RETRIES = 0x00FF0000;
 // scratch[4] to [7] belong to the SDK's watchdog_reboot()
 
 enum RebootWhy : uint8_t { RB_RESET, RB_REQUESTED, RB_WIFI, RB_AP_IDLE, RB_SCB_SILENT, RB_SCB_NONE, RB_WATCHDOG, RB_POWER, RB_COUNT };
@@ -170,7 +175,8 @@ enum Mode { M_NORMAL, M_SETUP, M_FALLBACK, M_RECOVERY, M_NO_ID };
 const char *const MODE_NAMES[] = {"normal", "setup", "fallback", "recovery", "no-identity"};
 
 const char *const CONFIG_FILE = "/unit.cfg", *const TRY_FILE = "/wifi.try", *const BOOTS_FILE = "/boots",
-                  *const BACKUP_FILE = "/backup.txt", *const MODEL_FILE = "/is3036";
+                  *const BACKUP_FILE = "/backup.txt", *const MODEL_FILE = "/is3036",
+                  *const JOIN_FILE = "/join.fail";
 extern "C" uint8_t _EEPROM_start;         // the flash's last sector; the factory's page is at its start
 
 unit::Identity   identity;
@@ -182,6 +188,11 @@ MDNSResponder::hMDNSService      amService = nullptr;
 MDNSResponder::hMDNSServiceQuery amQuery = nullptr;
 const int      MAX_PEERS = 16;
 const uint32_t ELECT_EVERY_MS = 20000, ELECT_SETTLE_MS = 45000;   // the settle lets the first answers arrive
+const uint32_t GROUP_EVERY_MS = 300000, GROUP_SOON_MS = 3000, GROUP_STEP_MS = 500;   // a round of the other units, and one unit of it
+const uint32_t GROUP_HTTP_MS  = 1500;     // each of connecting to another unit and its answer; well inside WDT_MS
+uint32_t       groupNext = 0;
+int            groupAt = 0;
+char           joinPw[64] = "";   // a password just set here, to try against the other units' groups
 unit::Peer     peers[MAX_PEERS];
 int            nPeers = 0;
 bool           leading = false;
@@ -190,6 +201,7 @@ uint32_t       announcedAt = 0, lastElection = 0;
 void announceUnit();
 char     apSsid[32] = "";
 char     lastError[80] = "";
+char     joinNote[48] = "", joinFail[112] = "";   // the last join that failed, and the one on file
 bool     fsOk = false, backupSaved = false, bootsCleared = false;
 bool     saved3036 = false, sawLongFrame = false;   // the 3036 answer on file, and a 51-byte frame waiting to be compared with it
 uint32_t apIdleSince = 0, rebootAt = 0, loginBlockedUntil = 0;
@@ -244,7 +256,9 @@ UdpLog Log;
 void rebootNow(RebootWhy why, bool stall) {
   if (stall) SCRATCH_STALLS = SCRATCH_STALLS + 1;
   SCRATCH_TOTAL = SCRATCH_TOTAL + 1;
-  SCRATCH_BOOT = (SCRATCH_BOOT & 1) | ((uint32_t)why << 8);
+  uint32_t retries = (SCRATCH_BOOT & BOOT_RETRIES) >> 16;
+  if (why == RB_AP_IDLE && retries < 255) retries++;
+  SCRATCH_BOOT = (SCRATCH_BOOT & 1) | ((uint32_t)why << 8) | (retries << 16);
   Log.printf("REBOOT: %s\n", REBOOT_TEXT[why]);
   delay(200);
   rp2040.reboot();
@@ -480,9 +494,15 @@ void randomHex(char *out, size_t bytes) {
   unit::toHex(r, bytes, out);
 }
 
+// Set on this unit's own page. The other units are offered it within seconds (serviceGroup).
 void setAdminPassword(const char *pw) {
+  if (cfg.hasAdmin()) strcpy(cfg.prev, cfg.hash);
+  cfg.solo = false;
   randomHex(cfg.salt, unit::SALT_HEX / 2);
   unit::hashPassword(pw, cfg.salt, cfg.hash);
+  snprintf(joinPw, sizeof(joinPw), "%s", pw);      // held until serviceJoin has asked the other units, then wiped
+  groupAt = 0;
+  groupNext = millis() + GROUP_SOON_MS;
 }
 
 void useSavedProbes() {
@@ -502,6 +522,8 @@ bool joinWifi(const char *ssid, const char *pass) {
   uint32_t t0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < WIFI_JOIN_MS) delay(100);
   bool ok = WiFi.status() == WL_CONNECTED;
+  if (!ok) snprintf(joinNote, sizeof(joinNote), "status %d, link %d, %lu ms", (int)WiFi.status(), cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA),
+                    (unsigned long)(millis() - t0));
   Log.printf("join %s: %s, %s, RSSI %d dBm, %lu ms\n", ssid, ok ? "ok" : "failed", WiFi.localIP().toString().c_str(), WiFi.RSSI(),
              (unsigned long)(millis() - t0));
   return ok;
@@ -536,9 +558,27 @@ void scanNetworks() {
   WiFi.scanDelete();
 }
 
+// The saved WiFi did not join. Keeps the first failure of a run on file, with what the scan saw of that network.
+void noteJoinFailure() {
+  int seen = -1;
+  for (int k = 0; k < nNetworks; k++) if (!strcmp(networks[k].ssid, cfg.ssid)) seen = k;
+  char line[sizeof(joinFail)];
+  if (seen >= 0) snprintf(line, sizeof(line), "%s; %.32s seen at %d dBm; boot %s", joinNote, cfg.ssid, networks[seen].rssi, REBOOT_TEXT[lastBoot]);
+  else snprintf(line, sizeof(line), "%s; %.32s not seen among %d networks; boot %s", joinNote, cfg.ssid, nNetworks, REBOOT_TEXT[lastBoot]);
+  Log.printf("saved WiFi did not join: %s\n", line);
+  if (!fsOk || (SCRATCH_BOOT & BOOT_RETRIES)) return;
+  strcpy(joinFail, line);
+  File f = LittleFS.open(JOIN_FILE, "w");
+  if (f) {
+    f.print(line);
+    f.close();
+  }
+}
+
 void startSetupNetwork(Mode m) {
   mode = m;
   scanNetworks();                                  // before the AP: the radio cannot do both reliably
+  if (m == M_FALLBACK) noteJoinFailure();
   WiFi.end();
   snprintf(apSsid, sizeof(apSsid), "AirMaster-%s", identity.unitId);
   WiFi.mode(WIFI_AP);
@@ -580,6 +620,13 @@ void startNetwork(bool powerOn) {
   identity = unit::parseIdentity(&_EEPROM_start);
   loadUnit();
   backupSaved = fsOk && LittleFS.exists(BACKUP_FILE);
+  if (fsOk && LittleFS.exists(JOIN_FILE)) {
+    File f = LittleFS.open(JOIN_FILE, "r");
+    if (f) {
+      joinFail[f.readBytes(joinFail, sizeof(joinFail) - 1)] = 0;
+      f.close();
+    }
+  }
   saved3036 = fsOk && LittleFS.exists(MODEL_FILE);
   if (saved3036) parser.recall3036();          // the short frames cannot tell a 3036 from a 3642
 #ifndef HOSTNAME
@@ -626,6 +673,8 @@ void startNetwork(bool powerOn) {
 
   if (WiFi.status() == WL_CONNECTED) {
     mode = M_NORMAL;
+    groupNext = millis() + ELECT_SETTLE_MS + ELECT_EVERY_MS;   // once the other units have been heard
+    SCRATCH_BOOT &= ~BOOT_RETRIES;
     server.begin();
     if (MDNS.begin(hostLabel)) {
       MDNS.addService("http", "tcp", 80);
@@ -707,6 +756,106 @@ void electLeader(uint32_t now) {
   }
 }
 
+// --- the group password: offered to the other units ---------------------------------------------------------------
+
+// One request to another unit. Returns its HTTP status, 0 when it did not answer; its JSON lands in out.
+int peerHttp(const uint8_t ip[4], const char *method, const char *path, const char *form, char *out, size_t outLen) {
+  static char buf[512];
+  WiFiClient c;
+  out[0] = 0;
+  rp2040.wdt_reset();
+  c.setTimeout(GROUP_HTTP_MS);
+  if (!c.connect(IPAddress(ip[0], ip[1], ip[2], ip[3]), 80)) return 0;
+  rp2040.wdt_reset();
+  c.printf("%s %s HTTP/1.1\r\nHost: %u.%u.%u.%u\r\nX-AirMaster: 1\r\nConnection: close\r\n"
+           "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: %u\r\n\r\n%s",
+           method, path, ip[0], ip[1], ip[2], ip[3], (unsigned)strlen(form), form);
+  size_t n = 0;
+  uint32_t start = millis();
+  while (n < sizeof(buf) - 1 && millis() - start < GROUP_HTTP_MS && (c.connected() || c.available())) {
+    serviceUsb(millis());
+    if (c.available()) buf[n++] = (char)c.read();
+  }
+  buf[n] = 0;
+  c.stop();
+  rp2040.wdt_reset();
+  if (strncmp(buf, "HTTP/1.", 7) || n < 12) return 0;
+  const char *body = strstr(buf, "\r\n\r\n");
+  if (body) snprintf(out, outLen, "%s", body + 4);
+  return atoi(buf + 9);
+}
+
+// A password was just set on this unit's page. If other units already hold it, this unit takes the salt and hash of the
+// largest such group, or of the one with the lowest id among equals, its own fresh one included, and so joins a group in
+// place of starting one; units that set the same password at the same moment settle on one. It runs from loop() and
+// never inside a request.
+void serviceJoin() {
+  if (!joinPw[0]) return;
+  struct Seen { char id[unit::GROUP_ID_HEX + 1]; char salt[unit::SALT_HEX + 1]; int n; bool tried; };
+  static Seen seen[MAX_PEERS];
+  int nSeen = 0;
+  char mine[unit::GROUP_ID_HEX + 1];
+  unit::groupId(cfg, mine);
+  for (int i = 0; i < nPeers; i++) {
+    char answer[160], id[unit::GROUP_ID_HEX + 1], salt[unit::SALT_HEX + 1];
+    if (peerHttp(peers[i].ip, "GET", "/api/group", "", answer, sizeof(answer)) != 200) continue;
+    if (!unit::jsonText(answer, "id", id, sizeof(id)) || !unit::jsonText(answer, "salt", salt, sizeof(salt))) continue;
+    int at = -1;
+    for (int k = 0; k < nSeen; k++) if (!strcmp(seen[k].id, id)) at = k;
+    if (at < 0) {
+      at = nSeen++;
+      strcpy(seen[at].id, id);
+      strcpy(seen[at].salt, salt);
+      seen[at].n = 0;
+      seen[at].tried = false;
+    }
+    seen[at].n++;
+  }
+  for (;;) {                                       // best first: the most units, then the lowest id
+    int best = -1;
+    for (int k = 0; k < nSeen; k++)
+      if (!seen[k].tried && (best < 0 || unit::groupBetter(seen[k].n, seen[k].id, seen[best].n, seen[best].id))) best = k;
+    if (best < 0 || !unit::groupBetter(seen[best].n, seen[best].id, 1, mine)) break;   // this unit's own is as good
+    seen[best].tried = true;
+    char hash[unit::HASH_HEX + 1];
+    rp2040.wdt_reset();
+    bool same = unit::groupSamePassword(joinPw, seen[best].salt, seen[best].id, hash);
+    rp2040.wdt_reset();
+    if (!same) continue;
+    unit::UnitConfig before = cfg;
+    strcpy(cfg.salt, seen[best].salt);
+    strcpy(cfg.hash, hash);
+    if (saveUnit()) Log.printf("password matches group %s of %d: joined it\n", seen[best].id, seen[best].n);
+    else cfg = before;
+    break;
+  }
+  memset(joinPw, 0, sizeof(joinPw));
+}
+
+// Asks one other unit a pass which password it holds, and offers this unit's where the rules allow (UnitCore.h).
+// A round covers every unit heard; rounds are GROUP_EVERY_MS apart, and one starts soon after a change here.
+void serviceGroup(uint32_t now) {
+  if (joinPw[0]) { serviceJoin(); return; }        // before any offer: the password set here may be another group's
+  if (!cfg.hasAdmin() || (int32_t)(now - groupNext) < 0) return;
+  if (groupAt >= nPeers) {
+    groupAt = 0;
+    groupNext = now + GROUP_EVERY_MS;
+    return;
+  }
+  const unit::Peer p = peers[groupAt++];
+  groupNext = now + GROUP_STEP_MS;
+  char answer[160], id[unit::GROUP_ID_HEX + 1] = "";
+  if (peerHttp(p.ip, "GET", "/api/group", "", answer, sizeof(answer)) != 200) return;   // off, or firmware before 1.2.6
+  if (!unit::jsonText(answer, "id", id, sizeof(id))) return;
+  unit::GroupOffer offer = unit::groupOffer(cfg, id);
+  if (offer == unit::GO_NOTHING) return;
+  char form[unit::SALT_HEX + 2 * unit::HASH_HEX + 24], proof[unit::HASH_HEX + 1] = "";
+  if (offer == unit::GO_PROVE) unit::groupProof(cfg.prev, cfg.salt, cfg.hash, proof);
+  snprintf(form, sizeof(form), "salt=%s&hash=%s&proof=%s", cfg.salt, cfg.hash, proof);
+  int code = peerHttp(p.ip, "POST", "/api/group", form, answer, sizeof(answer));
+  Log.printf("group password offered to %s: %d\n", p.serial[0] ? p.serial : "a unit", code);
+}
+
 void serviceNetwork(uint32_t now) {
   if (rebootAt && (int32_t)(now - rebootAt) >= 0) rebootNow(RB_REQUESTED, false);
   if (!bootsCleared && now > BOOT_WINDOW_MS) {     // a power-up that lasted: the count starts again
@@ -743,6 +892,7 @@ void serviceNetwork(uint32_t now) {
       electLeader(now);
       if (WiFi.status() == WL_CONNECTED) {
         wifiDown = false;
+        serviceGroup(now);
       } else if (!wifiDown) {
         wifiDown = true;
         wifiLostAt = now;
@@ -754,11 +904,14 @@ void serviceNetwork(uint32_t now) {
       dns.processNextRequest();
       break;
     case M_FALLBACK:
-    case M_RECOVERY:
+    case M_RECOVERY: {
       dns.processNextRequest();
+      uint32_t retries = (SCRATCH_BOOT & BOOT_RETRIES) >> 16, idle = AP_IDLE_MS;
+      if (mode == M_FALLBACK && retries < sizeof(FALLBACK_IDLE_MS) / sizeof(FALLBACK_IDLE_MS[0])) idle = FALLBACK_IDLE_MS[retries];
       if (WiFi.softAPgetStationNum() > 0) apIdleSince = now;
-      else if (now - apIdleSince > AP_IDLE_MS) rebootNow(RB_AP_IDLE, false);
+      else if (now - apIdleSince > idle) rebootNow(RB_AP_IDLE, false);
       break;
+    }
     case M_NO_ID:
       break;
   }
@@ -1061,6 +1214,10 @@ void infoJson(char *b, size_t len, const HttpRequest &r, uint32_t now) {
   n = apStr(b, n, len, "ip", WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "");
   n = apStr(b, n, len, "error", lastError);
   n = apStr(b, n, len, "last_boot", REBOOT_TEXT[lastBoot]);
+  n = apStr(b, n, len, "join_fail", joinFail);
+  char group[unit::GROUP_ID_HEX + 1];
+  unit::groupId(cfg, group);
+  n = apStr(b, n, len, "group", group);
   n = ap(b, n, len, "\"reboots\":%lu,\"model\":%u,", (unsigned long)SCRATCH_TOTAL,
          haveFrame && millis() - lastFrameMs < SCB_REPORT_MS ? parser.status.model : 0);
   n = ap(b, n, len, "\"admin\":%d,\"wifi\":%d,\"logged_in\":%d,\"cal\":%d,\"by_order\":%d,\"backup\":%d,", cfg.hasAdmin() ? 1 : 0, cfg.hasWifi() ? 1 : 0,
@@ -1125,6 +1282,33 @@ int startJob(char *form, char *body, size_t len, uint32_t now) {
 
 bool validPassword(const char *pw) { return strlen(pw) >= 8; }
 
+// Another unit's offer. No login: the rules in UnitCore.h decide, and a refusal costs the sender the login delay.
+int postGroup(const char *form, char *body, size_t len, uint32_t now) {
+  if (mode != M_NORMAL || !identity.valid) return jobError(body, len, 403, "not now");
+  if ((int32_t)(loginBlockedUntil - now) > 0) return jobError(body, len, 429, "Wait a moment and try again.");
+  char salt[unit::SALT_HEX + 1] = "", hash[unit::HASH_HEX + 1] = "", proof[unit::HASH_HEX + 1] = "";
+  unit::formGet(form, "salt", salt, sizeof(salt));
+  unit::formGet(form, "hash", hash, sizeof(hash));
+  unit::formGet(form, "proof", proof, sizeof(proof));
+  unit::UnitConfig before = cfg;
+  unit::GroupTaken taken = unit::groupAccept(cfg, salt, hash, proof);
+  if (taken == unit::GT_REFUSED) {
+    loginBlockedUntil = millis() + LOGIN_DELAY_MS;
+    return jobError(body, len, 403, "refused");
+  }
+  if (taken == unit::GT_TAKEN) {
+    if (!saveUnit()) {
+      cfg = before;
+      return jobError(body, len, 500, "could not save");
+    }
+    groupAt = 0;                                   // pass it on to units this one hears and the sender may not
+    groupNext = millis() + GROUP_SOON_MS;
+    Log.println("group password taken from another unit");
+  }
+  snprintf(body, len, "{\"ok\":1}");
+  return 200;
+}
+
 // The first-setup form, and the same form on recovery or fallback, where a blank field keeps what is saved.
 int postSetup(const char *form, char *body, size_t len, uint32_t now) {
   if (mode == M_NORMAL) return jobError(body, len, 403, "setup is only open on the unit's own network");
@@ -1139,8 +1323,9 @@ int postSetup(const char *form, char *body, size_t len, uint32_t now) {
   if (hasName && name[0]) strcpy(cfg.name, name);
   if (hasAdmin) {
     setAdminPassword(admin);
-  } else if (mode == M_RECOVERY && cfg.hasAdmin()) {   // the owner forgot it: the label's password works again
-    cfg.salt[0] = cfg.hash[0] = 0;
+  } else if (mode == M_RECOVERY && cfg.hasAdmin()) {   // the owner forgot it: the label's password works again,
+    cfg.salt[0] = cfg.hash[0] = cfg.prev[0] = 0;       // and the other units do not hand the forgotten one back
+    cfg.solo = true;
   }
   if (!saveUnit()) return jobError(body, len, 500, "could not save");
   if (hasSsid) {
@@ -1255,6 +1440,13 @@ int route(WiFiClient &c, const HttpRequest &r, char *form, char *body, size_t le
     if (!strcmp(t, "/settings")) { settingsJson(body, len, now); return 200; }
     if (!strcmp(t, "/api/info")) { infoJson(body, len, r, now); return 200; }
     if (!strcmp(t, "/api/units")) { unitsJson(body, len); return 200; }
+    if (!strcmp(t, "/api/group")) {
+      char id[unit::GROUP_ID_HEX + 1];
+      unit::groupId(cfg, id);
+      if (cfg.hasAdmin()) snprintf(body, len, "{\"id\":\"%s\",\"salt\":\"%s\"}", id, cfg.salt);
+      else snprintf(body, len, "{\"id\":\"%s\"}", id);
+      return 200;
+    }
     if (!strcmp(t, "/")) return 0;                 // the page
     return jobError(body, len, 404, "not found");
   }
@@ -1262,6 +1454,7 @@ int route(WiFiClient &c, const HttpRequest &r, char *form, char *body, size_t le
   if (!r.markedApi) return jobError(body, len, 403, "use the AirMaster page");
 
   if (!strcmp(t, "/api/setup")) return postSetup(form, body, len, now);
+  if (!strcmp(t, "/api/group")) return postGroup(form, body, len, now);
   if (!strcmp(t, "/api/login")) {
     if ((int32_t)(loginBlockedUntil - now) > 0) return jobError(body, len, 429, "Wait a moment and try again.");
     char pw[64] = "", hash[unit::HASH_HEX + 1];
@@ -1400,6 +1593,11 @@ void logJob() {
 
 // --- core 0: everything but the USB stack ----------------------------------------------------------
 
+// The two cores otherwise split one 8 KB stack, 4 KB each. Core 0 measured 2.2 KB free inside a request and 3.2 KB in
+// loop(), before lwIP and the radio driver take theirs, and units restarted on the watchdog when they called each other
+// at the same moment. With this the core gives core 1 its own 8 KB from the heap and core 0 keeps all of the first.
+bool core1_separate_stack = true;
+
 void setup() {
   if (SCRATCH_TAG != SCRATCH_MAGIC) {          // power-on: the scratch registers hold nothing yet
     SCRATCH_TAG = SCRATCH_MAGIC;
@@ -1414,7 +1612,7 @@ void setup() {
     uint8_t why = (SCRATCH_BOOT >> 8) & 0xFF;
     lastBoot = why < RB_COUNT ? why : RB_RESET;
   }
-  SCRATCH_BOOT &= 1;
+  SCRATCH_BOOT &= BOOT_RETRIES | 1;
   Serial1.begin(115200);
   analogWriteFreq(1000);                   // 1 kHz shows no flicker
   analogWriteRange(unit::LED_PWM_RANGE);
@@ -1431,7 +1629,7 @@ void setup() {
   Wire.begin();
 
   bool powerOn = SCRATCH_BOOT & 1;
-  SCRATCH_BOOT = 0;
+  SCRATCH_BOOT &= BOOT_RETRIES;
   startNetwork(powerOn);
 
   bool ds = bus.begin();
