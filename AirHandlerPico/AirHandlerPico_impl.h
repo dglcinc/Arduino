@@ -192,6 +192,7 @@ const uint32_t GROUP_EVERY_MS = 300000, GROUP_SOON_MS = 3000, GROUP_STEP_MS = 50
 const uint32_t GROUP_HTTP_MS  = 1500;     // each of connecting to another unit and its answer; well inside WDT_MS
 uint32_t       groupNext = 0;
 int            groupAt = 0;
+char           joinPw[64] = "";   // a password just set here, to try against the other units' groups
 unit::Peer     peers[MAX_PEERS];
 int            nPeers = 0;
 bool           leading = false;
@@ -493,38 +494,13 @@ void randomHex(char *out, size_t bytes) {
   unit::toHex(r, bytes, out);
 }
 
-int peerHttp(const uint8_t ip[4], const char *method, const char *path, const char *form, char *out, size_t outLen);
-
-// Whether another unit already holds pw. If one does, this unit takes its salt and hash, and so joins its group.
-bool joinGroup(const char *pw) {
-  if (mode != M_NORMAL || WiFi.status() != WL_CONNECTED) return false;
-  char tried[unit::GROUP_ID_HEX + 1] = "";
-  for (int i = 0; i < nPeers; i++) {
-    char answer[160], id[unit::GROUP_ID_HEX + 1], salt[unit::SALT_HEX + 1], hash[unit::HASH_HEX + 1];
-    if (peerHttp(peers[i].ip, "GET", "/api/group", "", answer, sizeof(answer)) != 200) continue;
-    if (!unit::jsonText(answer, "id", id, sizeof(id)) || !unit::jsonText(answer, "salt", salt, sizeof(salt))) continue;
-    if (!strcmp(id, tried)) continue;              // units of one group answer alike: hash once
-    strcpy(tried, id);
-    rp2040.wdt_reset();
-    bool same = unit::groupSamePassword(pw, salt, id, hash);
-    rp2040.wdt_reset();
-    if (!same) continue;
-    strcpy(cfg.salt, salt);
-    strcpy(cfg.hash, hash);
-    Log.printf("password matches %s: joined its group\n", peers[i].serial[0] ? peers[i].serial : "another unit");
-    return true;
-  }
-  return false;
-}
-
 // Set on this unit's own page. The other units are offered it within seconds (serviceGroup).
 void setAdminPassword(const char *pw) {
   if (cfg.hasAdmin()) strcpy(cfg.prev, cfg.hash);
   cfg.solo = false;
-  if (!joinGroup(pw)) {
-    randomHex(cfg.salt, unit::SALT_HEX / 2);
-    unit::hashPassword(pw, cfg.salt, cfg.hash);
-  }
+  randomHex(cfg.salt, unit::SALT_HEX / 2);
+  unit::hashPassword(pw, cfg.salt, cfg.hash);
+  snprintf(joinPw, sizeof(joinPw), "%s", pw);      // held until serviceJoin has asked the other units, then wiped
   groupAt = 0;
   groupNext = millis() + GROUP_SOON_MS;
 }
@@ -809,9 +785,57 @@ int peerHttp(const uint8_t ip[4], const char *method, const char *path, const ch
   return atoi(buf + 9);
 }
 
+// A password was just set on this unit's page. If other units already hold it, this unit takes the salt and hash of the
+// largest such group, or of the one with the lowest id among equals, its own fresh one included, and so joins a group in
+// place of starting one; units that set the same password at the same moment settle on one. It runs from loop() and
+// never inside a request.
+void serviceJoin() {
+  if (!joinPw[0]) return;
+  struct Seen { char id[unit::GROUP_ID_HEX + 1]; char salt[unit::SALT_HEX + 1]; int n; bool tried; };
+  static Seen seen[MAX_PEERS];
+  int nSeen = 0;
+  char mine[unit::GROUP_ID_HEX + 1];
+  unit::groupId(cfg, mine);
+  for (int i = 0; i < nPeers; i++) {
+    char answer[160], id[unit::GROUP_ID_HEX + 1], salt[unit::SALT_HEX + 1];
+    if (peerHttp(peers[i].ip, "GET", "/api/group", "", answer, sizeof(answer)) != 200) continue;
+    if (!unit::jsonText(answer, "id", id, sizeof(id)) || !unit::jsonText(answer, "salt", salt, sizeof(salt))) continue;
+    int at = -1;
+    for (int k = 0; k < nSeen; k++) if (!strcmp(seen[k].id, id)) at = k;
+    if (at < 0) {
+      at = nSeen++;
+      strcpy(seen[at].id, id);
+      strcpy(seen[at].salt, salt);
+      seen[at].n = 0;
+      seen[at].tried = false;
+    }
+    seen[at].n++;
+  }
+  for (;;) {                                       // best first: the most units, then the lowest id
+    int best = -1;
+    for (int k = 0; k < nSeen; k++)
+      if (!seen[k].tried && (best < 0 || unit::groupBetter(seen[k].n, seen[k].id, seen[best].n, seen[best].id))) best = k;
+    if (best < 0 || !unit::groupBetter(seen[best].n, seen[best].id, 1, mine)) break;   // this unit's own is as good
+    seen[best].tried = true;
+    char hash[unit::HASH_HEX + 1];
+    rp2040.wdt_reset();
+    bool same = unit::groupSamePassword(joinPw, seen[best].salt, seen[best].id, hash);
+    rp2040.wdt_reset();
+    if (!same) continue;
+    unit::UnitConfig before = cfg;
+    strcpy(cfg.salt, seen[best].salt);
+    strcpy(cfg.hash, hash);
+    if (saveUnit()) Log.printf("password matches group %s of %d: joined it\n", seen[best].id, seen[best].n);
+    else cfg = before;
+    break;
+  }
+  memset(joinPw, 0, sizeof(joinPw));
+}
+
 // Asks one other unit a pass which password it holds, and offers this unit's where the rules allow (UnitCore.h).
 // A round covers every unit heard; rounds are GROUP_EVERY_MS apart, and one starts soon after a change here.
 void serviceGroup(uint32_t now) {
+  if (joinPw[0]) { serviceJoin(); return; }        // before any offer: the password set here may be another group's
   if (!cfg.hasAdmin() || (int32_t)(now - groupNext) < 0) return;
   if (groupAt >= nPeers) {
     groupAt = 0;
@@ -1568,6 +1592,11 @@ void logJob() {
 }
 
 // --- core 0: everything but the USB stack ----------------------------------------------------------
+
+// The two cores otherwise split one 8 KB stack, 4 KB each. Core 0 measured 2.2 KB free inside a request and 3.2 KB in
+// loop(), before lwIP and the radio driver take theirs, and units restarted on the watchdog when they called each other
+// at the same moment. With this the core gives core 1 its own 8 KB from the heap and core 0 keeps all of the first.
+bool core1_separate_stack = true;
 
 void setup() {
   if (SCRATCH_TAG != SCRATCH_MAGIC) {          // power-on: the scratch registers hold nothing yet

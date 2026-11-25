@@ -452,6 +452,12 @@ inline bool groupSamePassword(const char *pw, const char *peerSalt, const char *
   return !strcmp(id, peerId);
 }
 
+// Which of two groups a unit joins when its password fits both: the one with more units, then the lower id.
+inline bool groupBetter(int nA, const char *idA, int nB, const char *idB) {
+  if (nA != nB) return nA > nB;
+  return strcmp(idA, idB) < 0;
+}
+
 // The text of a "key":"value" pair in a unit's short JSON answer. False when absent or too long for out.
 inline bool jsonText(const char *json, const char *key, char *out, size_t outLen) {
   char pat[24];

@@ -158,6 +158,8 @@ int main(int argc, char **argv) {
     assert(jsonText("{\"id\":\"0a1b2c3d\",\"salt\":\"ff\"}\r\n", "id", got, sizeof(got)) && !strcmp(got, "0a1b2c3d"));
     assert(jsonText("{\"id\":\"0a1b2c3d\",\"salt\":\"ff\"}", "salt", got, sizeof(got)) && !strcmp(got, "ff"));
     assert(!jsonText("{\"id\":\"-\"}", "salt", got, sizeof(got)) && !jsonText("{\"id\":\"0123456789\"}", "id", got, 9));
+    assert(groupBetter(4, "ffff0000", 1, "00000000") && !groupBetter(1, "00000000", 4, "ffff0000"));
+    assert(groupBetter(1, "0a000000", 1, "0b000000") && !groupBetter(1, "0b000000", 1, "0a000000") && !groupBetter(2, "aa", 2, "aa"));
     UnitConfig other;                                                // a unit with an unrelated password is left alone
     strcpy(other.salt, a.salt);
     hashPassword("someone else's", other.salt, other.hash);

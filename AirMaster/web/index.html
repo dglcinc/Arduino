@@ -294,7 +294,7 @@ function renderUnit(){
   // password
   const a1=$("input",{type:"password",autocomplete:"new-password"}),a2=$("input",{type:"password",autocomplete:"new-password"});
   main.append($("section",{},$("h2",{textContent:"Admin password"}),$("p",{textContent:"The unit starts with the password on its label. Change it here if you want another. Your other AirMasters take the new password within a few minutes."}),field("New password, 8 characters or more",a1),field("Again",a2),$("div",{class:"bar"},
-    $("button",{textContent:"Change password",on:{click:()=>act(out,async()=>{if(a1.value!==a2.value)throw new Error("The two passwords differ.");await post("api/unit",{admin:a1.value});a1.value=a2.value="";out.replaceChildren(msg("Password changed.","ok"))})}}))));
+    $("button",{textContent:"Change password",on:{click:()=>act(out,async()=>{if(a1.value!==a2.value)throw new Error("The two passwords differ.");const pw=a1.value;await post("api/unit",{admin:pw});a1.value=a2.value="";setTimeout(()=>post("api/login",{password:pw}).catch(()=>{}),5000);out.replaceChildren(msg("Password changed.","ok"))})}}))));
   // firmware
   const file=$("input",{type:"file",accept:".bin"}),prog=$("div",{class:"note"});
   main.append($("section",{},$("h2",{textContent:"Firmware update"}),field("Firmware file (.bin)",file),prog,$("div",{class:"bar"},
